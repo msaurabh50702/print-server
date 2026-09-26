@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">Home print server</p>
+  <h2>What would you like to print today?</h2>
+</section>
+
+<nav class="choices" aria-label="Print options">
+  <a class="choice" href="{{ url_for('photos_page') }}">
+    <span class="choice-icon photos">{{ icon("photo") }}</span>
+    <span class="choice-text">
+      <strong>Print photos</strong>
+      <span>Put 1–16 photos on one A4 page, then crop and rotate each one.</span>
+    </span>
+    <span class="chev">{{ icon("back") }}</span>
+  </a>
+  <a class="choice" href="{{ url_for('document_page') }}">
+    <span class="choice-icon docs">{{ icon("doc") }}</span>
+    <span class="choice-text">
+      <strong>Print document</strong>
+      <span>PDF, Word, Excel, PowerPoint, text or images, with a preview before printing.</span>
+    </span>
+    <span class="chev">{{ icon("back") }}</span>
+  </a>
+</nav>
+
+<p class="footnote">Tip: add this page to your home screen for one-tap printing.</p>
+{% endblock %}

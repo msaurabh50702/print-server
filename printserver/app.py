@@ -1,0 +1,186 @@
+"""Flask web app: photo sheets and document printing over the home network."""
+import re
+import shutil
+import time
+import uuid
+from pathlib import Path
+
+from flask import Flask, abort, jsonify, render_template, request, send_file
+from werkzeug.utils import secure_filename
+
+from . import documents, photos, printing
+from .config import Config
+
+JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def create_app(config=None):
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    if config:
+        app.config.update(config)
+
+    data_dir = Path(app.config["DATA_DIR"])
+    jobs_dir = data_dir / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+
+    def cleanup_old_jobs():
+        cutoff = time.time() - app.config["JOB_TTL_SECONDS"]
+        for job in jobs_dir.iterdir():
+            try:
+                if job.stat().st_mtime < cutoff:
+                    shutil.rmtree(job, ignore_errors=True)
+            except FileNotFoundError:
+                pass
+
+    def new_job_dir():
+        cleanup_old_jobs()
+        job_id = uuid.uuid4().hex
+        path = jobs_dir / job_id
+        path.mkdir()
+        return job_id, path
+
+    def job_dir(job_id):
+        if not JOB_ID_RE.match(job_id):
+            abort(404)
+        path = jobs_dir / job_id
+        if not (path / "document.pdf").exists():
+            abort(404)
+        return path
+
+    def submit(pdf_path, **kwargs):
+        return printing.submit(
+            pdf_path, app.config["PRINTER_NAME"], app.config["DRY_RUN"],
+            app.config["DRY_RUN_DIR"], **kwargs)
+
+    def int_arg(value, default, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return default
+
+    @app.errorhandler(printing.PrintError)
+    @app.errorhandler(documents.ConversionError)
+    def handle_known_error(exc):
+        return jsonify(error=str(exc)), 400
+
+    @app.errorhandler(413)
+    def too_large(_exc):
+        return jsonify(error="File is too large"), 413
+
+    # ---------- pages ----------
+
+    @app.get("/")
+    def index():
+        return render_template("index.html")
+
+    @app.get("/photos")
+    def photos_page():
+        layouts = photos.layouts_for_client(app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"])
+        sheet = {"margin_mm": app.config["PAGE_MARGIN_MM"], "gap_mm": app.config["CELL_GAP_MM"],
+                 "page_w_mm": photos.A4_MM[0]}
+        return render_template("photos.html", layouts=layouts, sheet=sheet)
+
+    @app.get("/document")
+    def document_page():
+        return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)))
+
+    # ---------- API ----------
+
+    @app.get("/api/status")
+    def status():
+        info = printing.printer_status(app.config["PRINTER_NAME"])
+        if app.config["DRY_RUN"]:
+            info.update(ok=True, dry_run=True, message="Dry-run mode: jobs are saved, not printed")
+        return jsonify(info)
+
+    def compose_photo_request():
+        layout = request.form.get("layout", "")
+        if layout not in photos.LAYOUTS:
+            raise printing.PrintError("Unknown layout")
+        images = {}
+        for key, file in request.files.items():
+            match = re.fullmatch(r"cell(\d+)", key)
+            if match and file.filename is not None:
+                images[int(match.group(1))] = file.stream
+        if not images:
+            raise printing.PrintError("Add at least one photo first")
+        fit = "fit" if request.form.get("fit") == "fit" else "fill"
+        try:
+            page = photos.compose_sheet(
+                layout, images, app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"],
+                app.config["PHOTO_DPI"], fit)
+        except (ValueError, OSError) as exc:
+            raise printing.PrintError(f"Could not read photo: {exc}")
+        _, path = new_job_dir()
+        pdf_path = path / "document.pdf"
+        photos.save_pdf(page, pdf_path, app.config["PHOTO_DPI"])
+        return pdf_path
+
+    @app.post("/api/photos/pdf")
+    def photos_pdf():
+        pdf_path = compose_photo_request()
+        return send_file(pdf_path, mimetype="application/pdf",
+                         as_attachment=True, download_name="photos.pdf")
+
+    @app.post("/api/photos/print")
+    def photos_print():
+        pdf_path = compose_photo_request()
+        copies = int_arg(request.form.get("copies"), 1, 1, 99)
+        job = submit(pdf_path, copies=copies, title="Photos")
+        return jsonify(job=job)
+
+    @app.post("/api/documents")
+    def upload_document():
+        file = request.files.get("file")
+        if not file or not file.filename:
+            raise printing.PrintError("Choose a file to upload")
+        name = secure_filename(file.filename) or "upload"
+        ext = Path(name).suffix.lower()
+        if ext not in documents.ALLOWED_EXTS:
+            raise documents.ConversionError(f"Unsupported file type '{ext or name}'")
+        job_id, path = new_job_dir()
+        source = path / f"source{ext}"
+        file.save(source)
+        try:
+            pdf = documents.to_pdf(source, path)
+        except Exception:
+            shutil.rmtree(path, ignore_errors=True)
+            raise
+        (path / "name.txt").write_text(file.filename[:200])
+        return jsonify(id=job_id, name=file.filename, pages=documents.page_count(pdf))
+
+    @app.get("/api/documents/<job_id>/page/<int:page>.png")
+    def document_page_png(job_id, page):
+        path = job_dir(job_id)
+        pdf = path / "document.pdf"
+        if not 1 <= page <= documents.page_count(pdf):
+            abort(404)
+        png = documents.render_page(pdf, page, path / f"page-{page}.png")
+        return send_file(png, mimetype="image/png", max_age=3600)
+
+    @app.get("/api/documents/<job_id>/pdf")
+    def document_pdf(job_id):
+        return send_file(job_dir(job_id) / "document.pdf", mimetype="application/pdf")
+
+    @app.post("/api/documents/<job_id>/print")
+    def document_print(job_id):
+        path = job_dir(job_id)
+        pdf = path / "document.pdf"
+        options = request.get_json(silent=True) or {}
+        try:
+            ranges = printing.parse_page_ranges(options.get("pages"), documents.page_count(pdf))
+        except ValueError as exc:
+            raise printing.PrintError(str(exc))
+        name_file = path / "name.txt"
+        job = submit(
+            pdf,
+            copies=int_arg(options.get("copies"), 1, 1, 99),
+            page_ranges=ranges,
+            duplex=bool(options.get("duplex")),
+            fit_to_page=bool(options.get("fit_to_page", True)),
+            title=name_file.read_text() if name_file.exists() else "Document",
+        )
+        return jsonify(job=job)
+
+    return app

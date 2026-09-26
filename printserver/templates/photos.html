@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Print photos{% endblock %}
+{% block heading %}Print photos{% endblock %}
+{% block content %}
+
+<ol class="steps" aria-label="Progress">
+  <li id="st-1" class="current">Layout</li>
+  <li id="st-2">Photos</li>
+  <li id="st-3">Print</li>
+</ol>
+
+<section id="step-layout" class="fade-in">
+  <h2 class="section-title">How many photos per A4 page?</h2>
+  <div class="layouts">
+    {% for l in layouts %}
+    <button class="layout-btn" data-layout="{{ l.id }}" type="button">
+      <span class="mini-page" style="--cols: {{ l.cols }}; --rows: {{ l.rows }};">
+        {% for _ in range(l.cols * l.rows) %}<i></i>{% endfor %}
+      </span>
+      <strong>{{ l.id }} {{ "photo" if l.id == "1" else "photos" }}</strong>
+      <small>{{ l.cell_w_mm|round|int }} &times; {{ l.cell_h_mm|round|int }} mm</small>
+    </button>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="step-grid" class="fade-in" hidden>
+  <div class="grid-head">
+    <p class="hint" id="fill-count">Tap a box to add a photo</p>
+    <button id="change-layout" class="chip" type="button">{{ icon("grid") }}<span>Change layout</span></button>
+  </div>
+
+  <div class="page-wrap">
+    <div id="sheet" class="sheet"></div>
+  </div>
+
+  <div class="card options">
+    <div class="option">
+      <span class="option-label">Photo fit</span>
+      <div class="segmented" role="radiogroup" aria-label="Photo fit">
+        <label><input type="radio" name="fit" value="fill" checked><span>Fill box</span></label>
+        <label><input type="radio" name="fit" value="fit"><span>Whole photo</span></label>
+      </div>
+    </div>
+    <div class="option">
+      <span class="option-label">Copies</span>
+      <div class="stepper">
+        <button type="button" data-step="-1" aria-label="Fewer copies">&minus;</button>
+        <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Copies">
+        <button type="button" data-step="1" aria-label="More copies">+</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <button id="download-pdf" class="btn ghost" type="button" aria-label="Download PDF">{{ icon("download") }}<span class="hide-sm">PDF</span></button>
+    <button id="print-photos" class="btn primary grow" type="button">{{ icon("print") }}<span>Print</span></button>
+  </div>
+</section>
+
+<input id="file-input" type="file" accept="image/*" hidden>
+
+<!-- Photo editor -->
+<div id="editor" class="editor" role="dialog" aria-modal="true" aria-label="Edit photo" hidden>
+  <div class="editor-head">
+    <button id="ed-cancel" class="icon-btn light" type="button" aria-label="Cancel">{{ icon("x") }}</button>
+    <strong>Crop &amp; rotate</strong>
+    <button id="ed-done" class="btn primary small" type="button">{{ icon("check") }}<span>Done</span></button>
+  </div>
+  <div id="ed-stage" class="ed-stage">
+    <canvas id="ed-canvas"></canvas>
+    <div class="ed-loading"><span class="spinner"></span></div>
+  </div>
+  <p class="ed-hint">Drag the box to move it. Drag a corner to resize.</p>
+  <div class="ed-tools" role="toolbar" aria-label="Edit tools">
+    <button id="ed-rot-left" class="tool" type="button">{{ icon("rot-left") }}<span>Left</span></button>
+    <button id="ed-rot-right" class="tool" type="button">{{ icon("rot-right") }}<span>Right</span></button>
+    <button id="ed-lock" class="tool active" type="button" aria-pressed="true">{{ icon("lock") }}<span>Box shape</span></button>
+    <button id="ed-reset" class="tool" type="button">{{ icon("reset") }}<span>Reset</span></button>
+    <button id="ed-all" class="tool" type="button">{{ icon("copy-all") }}<span>Fill all</span></button>
+    <button id="ed-replace" class="tool" type="button">{{ icon("swap") }}<span>Change</span></button>
+    <button id="ed-remove" class="tool danger" type="button">{{ icon("trash") }}<span>Remove</span></button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.LAYOUTS = {{ layouts|tojson }};
+  window.SHEET = {{ sheet|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/photos.js') }}"></script>
+{% endblock %}
