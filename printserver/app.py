@@ -81,6 +81,11 @@ def create_app(config=None):
                  "page_w_mm": photos.A4_MM[0]}
         return render_template("photos.html", layouts=layouts, sheet=sheet)
 
+    @app.get("/id-card")
+    def id_card_page():
+        card = {"w_mm": photos.ID_CARD_MM[0], "h_mm": photos.ID_CARD_MM[1]}
+        return render_template("idcard.html", card=card)
+
     @app.get("/document")
     def document_page():
         return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)))
@@ -129,6 +134,33 @@ def create_app(config=None):
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
         job = submit(pdf_path, copies=copies, title="Photos")
         return jsonify(job=job)
+
+    def compose_id_card_request():
+        front, back = request.files.get("front"), request.files.get("back")
+        if not front and not back:
+            raise printing.PrintError("Add a photo of the card first")
+        outline = request.form.get("outline", "1") != "0"
+        try:
+            page = photos.compose_id_card(
+                front.stream if front else None, back.stream if back else None,
+                app.config["PHOTO_DPI"], outline)
+        except (ValueError, OSError) as exc:
+            raise printing.PrintError(f"Could not read photo: {exc}")
+        _, path = new_job_dir()
+        pdf_path = path / "document.pdf"
+        photos.save_pdf(page, pdf_path, app.config["PHOTO_DPI"])
+        return pdf_path
+
+    @app.post("/api/id-card/pdf")
+    def id_card_pdf():
+        return send_file(compose_id_card_request(), mimetype="application/pdf",
+                         as_attachment=True, download_name="id-card.pdf")
+
+    @app.post("/api/id-card/print")
+    def id_card_print():
+        pdf_path = compose_id_card_request()
+        copies = int_arg(request.form.get("copies"), 1, 1, 99)
+        return jsonify(job=submit(pdf_path, copies=copies, title="ID card copy"))
 
     @app.post("/api/documents")
     def upload_document():

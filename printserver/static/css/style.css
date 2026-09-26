@@ -426,3 +426,30 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ==========================================================================
+   ID card copy
+   ========================================================================== */
+.choice-icon.idcard { background: linear-gradient(135deg, #10b981, #0ea5e9); }
+.id-tip { margin: 16px 0 18px; }
+.id-sheet { grid-template-rows: 1fr 1fr; }
+.id-half { display: grid; place-items: center; }
+.id-half + .id-half { border-top: 1px dashed #e3e6ef; }
+.id-slot {
+  /* Card width as a share of the A4 width, so the preview is to scale. */
+  width: calc(var(--card-w) / 210 * 100%);
+  min-width: 120px;
+  aspect-ratio: var(--card-w) / var(--card-h);
+  display: grid; place-items: center; overflow: hidden; padding: 0;
+  border: 1.5px dashed #c7cbe0; border-radius: 6px; background: #f6f7fc; color: #7c83a0;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.id-slot:hover { border-color: var(--accent); color: var(--accent); background: #eef0ff; }
+.id-empty { display: grid; justify-items: center; gap: 4px; font-size: .8rem; font-weight: 600; }
+.id-slot .plus {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 6px rgb(16 24 40 / .12); font-size: 1.1rem;
+}
+.id-slot.filled { border: 1px solid #c7cbe0; background: #fff; }
+.id-slot img { width: 100%; height: 100%; object-fit: cover; display: block; animation: fade-in .3s var(--ease); }
+.id-size { text-align: center; margin-top: 10px; font-size: .82rem; }

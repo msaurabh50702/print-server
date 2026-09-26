@@ -1,5 +1,5 @@
 """Photo sheet layouts and A4 page composition."""
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 A4_MM = (210.0, 297.0)
 MM_PER_INCH = 25.4
@@ -71,3 +71,35 @@ def compose_sheet(layout_id, images, margin_mm, gap_mm, dpi=300, fit="fill"):
 
 def save_pdf(page, path, dpi=300):
     page.save(path, "PDF", resolution=dpi)
+
+
+# ISO/IEC 7810 ID-1: bank cards, driving licences, most national ID cards.
+ID_CARD_MM = (85.6, 54.0)
+
+
+def compose_id_card(front, back=None, dpi=300, outline=True):
+    """Place an ID card's front and back at real size on an A4 page.
+
+    front/back: file-like or path, already cropped to the card. The front is
+    centred in the top half of the page and the back in the bottom half, like
+    a photocopier's ID-copy mode.
+    """
+    page = Image.new("RGB", (_mm_to_px(A4_MM[0], dpi), _mm_to_px(A4_MM[1], dpi)), "white")
+    card_w, card_h = _mm_to_px(ID_CARD_MM[0], dpi), _mm_to_px(ID_CARD_MM[1], dpi)
+    x = (page.width - card_w) // 2
+    half = page.height // 2
+    for source, top in ((front, 0), (back, half)):
+        if source is None:
+            continue
+        with Image.open(source) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            img = ImageOps.fit(img, (card_w, card_h), Image.LANCZOS)
+        y = top + (half - card_h) // 2
+        page.paste(img, (x, y))
+        if outline:
+            # Thin grey cutting guide just outside the card.
+            pad = max(1, dpi // 150)
+            ImageDraw.Draw(page).rectangle(
+                [x - pad, y - pad, x + card_w + pad - 1, y + card_h + pad - 1],
+                outline=(170, 170, 170), width=pad)
+    return page

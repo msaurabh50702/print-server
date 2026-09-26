@@ -60,28 +60,7 @@
 
 <input id="file-input" type="file" accept="image/*" hidden>
 
-<!-- Photo editor -->
-<div id="editor" class="editor" role="dialog" aria-modal="true" aria-label="Edit photo" hidden>
-  <div class="editor-head">
-    <button id="ed-cancel" class="icon-btn light" type="button" aria-label="Cancel">{{ icon("x") }}</button>
-    <strong>Crop &amp; rotate</strong>
-    <button id="ed-done" class="btn primary small" type="button">{{ icon("check") }}<span>Done</span></button>
-  </div>
-  <div id="ed-stage" class="ed-stage">
-    <canvas id="ed-canvas"></canvas>
-    <div class="ed-loading"><span class="spinner"></span></div>
-  </div>
-  <p class="ed-hint">Drag the box to move it. Drag a corner to resize.</p>
-  <div class="ed-tools" role="toolbar" aria-label="Edit tools">
-    <button id="ed-rot-left" class="tool" type="button">{{ icon("rot-left") }}<span>Left</span></button>
-    <button id="ed-rot-right" class="tool" type="button">{{ icon("rot-right") }}<span>Right</span></button>
-    <button id="ed-lock" class="tool active" type="button" aria-pressed="true">{{ icon("lock") }}<span>Box shape</span></button>
-    <button id="ed-reset" class="tool" type="button">{{ icon("reset") }}<span>Reset</span></button>
-    <button id="ed-all" class="tool" type="button">{{ icon("copy-all") }}<span>Fill all</span></button>
-    <button id="ed-replace" class="tool" type="button">{{ icon("swap") }}<span>Change</span></button>
-    <button id="ed-remove" class="tool danger" type="button">{{ icon("trash") }}<span>Remove</span></button>
-  </div>
-</div>
+{% include "_editor.html" %}
 {% endblock %}
 {% block scripts %}
 <script>

@@ -8,6 +8,9 @@ are needed on the phone or laptop.
 - **Print photos**: pick how many photos go on one A4 page (1, 2, 4, 6, 8, 9, 12 or 16).
   Tap each box in the grid to add a photo, then crop, rotate, change or remove it.
   "Fill all" repeats one photo in every empty box, which is handy for passport-style sheets.
+- **ID card copy**: photograph or upload the front and back of an ID card (Aadhaar, PAN,
+  driving licence, bank card and similar), crop each one to the card's edges, and print both on one
+  A4 page at real card size (85.6 × 54 mm), with an optional cutting guide.
 - **Print document**: upload a PDF, Word, Excel, PowerPoint, text or image file.
   Check the page previews, then print with copies, a page range and one- or two-sided options.
 - Mobile-first web UI with a sticky bottom action bar, a touch crop editor,
@@ -91,6 +94,9 @@ pytest
 
 - `printserver/photos.py` builds the A4 sheet at 300 DPI with Pillow. Crop and rotate happen
   in the browser (`static/js/editor.js`), and the server receives one cropped JPEG per box.
+- The ID card page reuses the same editor, locked to the ID-1 card shape. `compose_id_card` in
+  `photos.py` places the front in the top half and the back in the bottom half at 85.6 × 54 mm.
+  Jobs are sent without fit-to-page scaling, so the copy prints at 100%.
 - `printserver/documents.py` converts uploads to PDF (LibreOffice for Office files, Pillow for images)
   and renders page previews with `pdftoppm`.
 - `printserver/printing.py` sends jobs to CUPS with `lp`

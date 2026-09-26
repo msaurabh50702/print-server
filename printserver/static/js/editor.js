@@ -109,7 +109,8 @@ class PhotoEditor {
     });
   }
 
-  /* opts: { file, state, aspect, isNew, onDone(result), onAll(result), onRemove(), onReplace(), onCancel() } */
+  /* opts: { file, state, aspect, isNew, onDone(result), onAll(result)?, onRemove(), onReplace(), onCancel() }
+     "Fill all" is only shown when onAll is given. */
   async open(opts) {
     this.opts = opts;
     this.aspect = opts.aspect;
@@ -120,6 +121,7 @@ class PhotoEditor {
     this.lockBtn.setAttribute("aria-pressed", String(this.state.locked));
     document.getElementById("ed-remove").hidden = !!opts.isNew;
     document.getElementById("ed-replace").hidden = !!opts.isNew;
+    document.getElementById("ed-all").hidden = !opts.onAll;
     this.modal.hidden = false;
     this.modal.classList.add("loading");
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);

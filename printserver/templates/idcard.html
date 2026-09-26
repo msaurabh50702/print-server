@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}ID card copy{% endblock %}
+{% block heading %}ID card copy{% endblock %}
+{% block content %}
+
+<section class="fade-in">
+  <p class="hint id-tip">Lay the card on a dark, flat surface and take the photo from straight above. Then crop it to the card's edges.</p>
+
+  <div class="page-wrap">
+    <div class="sheet id-sheet" style="--card-w: {{ card.w_mm }}; --card-h: {{ card.h_mm }};">
+      {% for side in ["front", "back"] %}
+      <div class="id-half">
+        <button class="id-slot" type="button" data-side="{{ side }}" aria-label="Add {{ side }} of card">
+          <span class="id-empty">
+            <span class="plus" aria-hidden="true">+</span>
+            <span>{{ side|capitalize }}</span>
+          </span>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <p class="hint id-size">Printed at real size: {{ card.w_mm }} &times; {{ card.h_mm|int }} mm</p>
+
+  <div class="card options">
+    <div class="option">
+      <span class="option-label">Cutting guide</span>
+      <div class="segmented" role="radiogroup" aria-label="Cutting guide">
+        <label><input type="radio" name="outline" value="1" checked><span>On</span></label>
+        <label><input type="radio" name="outline" value="0"><span>Off</span></label>
+      </div>
+    </div>
+    <div class="option">
+      <span class="option-label">Copies</span>
+      <div class="stepper">
+        <button type="button" data-step="-1" aria-label="Fewer copies">&minus;</button>
+        <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Copies">
+        <button type="button" data-step="1" aria-label="More copies">+</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <button id="download-pdf" class="btn ghost" type="button" aria-label="Download PDF">{{ icon("download") }}<span class="hide-sm">PDF</span></button>
+    <button id="print-card" class="btn primary grow" type="button">{{ icon("print") }}<span>Print</span></button>
+  </div>
+</section>
+
+<input id="file-input" type="file" accept="image/*" hidden>
+{% include "_editor.html" %}
+{% endblock %}
+{% block scripts %}
+<script>window.CARD = {{ card|tojson }};</script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/idcard.js') }}"></script>
+{% endblock %}

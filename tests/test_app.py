@@ -7,7 +7,7 @@ from PIL import Image
 from pypdf import PdfReader
 
 from printserver import create_app
-from printserver.photos import LAYOUTS, compose_sheet
+from printserver.photos import ID_CARD_MM, LAYOUTS, compose_id_card, compose_sheet
 from printserver.printing import parse_page_ranges
 
 
@@ -30,7 +30,7 @@ def jpeg(color="red", size=(400, 300)):
 
 
 def test_pages_render(client):
-    for url in ("/", "/photos", "/document"):
+    for url in ("/", "/photos", "/id-card", "/document"):
         assert client.get(url).status_code == 200
 
 
@@ -130,3 +130,45 @@ def test_parse_page_ranges():
     for bad in ("0", "3-2", "6", "a", "1-"):
         with pytest.raises(ValueError):
             parse_page_ranges(bad, 5)
+
+
+def test_id_card_real_size_layout():
+    dpi = 100
+    page = compose_id_card(jpeg("red", (856, 540)), jpeg("blue", (856, 540)), dpi=dpi, outline=False)
+    assert page.size == (827, 1169)
+    card_w = round(ID_CARD_MM[0] / 25.4 * dpi)
+    card_h = round(ID_CARD_MM[1] / 25.4 * dpi)
+    # Front is centred in the top half, back in the bottom half, both at real size.
+    row = [page.getpixel((x, 1169 // 4)) for x in range(page.width)]
+    red = [x for x, px in enumerate(row) if px[0] > 200 and px[2] < 80]
+    assert abs(len(red) - card_w) <= 1
+    assert abs(red[0] - (page.width - card_w) // 2) <= 1
+    col = [page.getpixel((page.width // 2, y)) for y in range(page.height)]
+    assert abs(sum(1 for px in col if px[0] > 200 and px[2] < 80) - card_h) <= 1
+    assert abs(sum(1 for px in col if px[2] > 200 and px[0] < 80) - card_h) <= 1
+
+
+def test_id_card_front_only_and_outline():
+    page = compose_id_card(jpeg("red", (856, 540)), None, dpi=100, outline=True)
+    # Bottom half stays blank when there is no back side.
+    assert page.crop((0, 600, 827, 1169)).getextrema() == ((255, 255), (255, 255), (255, 255))
+
+
+def test_id_card_print_dry_run(client, app):
+    resp = client.post("/api/id-card/print", data={
+        "front": (jpeg(), "front.jpg"), "back": (jpeg("blue"), "back.jpg"), "copies": "2",
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    out = app.config["DRY_RUN_DIR"] / f"{resp.get_json()['job']}.pdf"
+    page = PdfReader(str(out)).pages[0]
+    # The PDF page must be exactly A4 so the card prints at real size.
+    assert round(float(page.mediabox.width) / 72 * 25.4) == 210
+    assert round(float(page.mediabox.height) / 72 * 25.4) == 297
+
+
+def test_id_card_pdf_and_missing_photo(client):
+    resp = client.post("/api/id-card/pdf", data={"back": (jpeg(), "b.jpg")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200 and resp.data.startswith(b"%PDF")
+    resp = client.post("/api/id-card/print", data={})
+    assert resp.status_code == 400
