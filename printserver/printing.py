@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 
@@ -77,7 +78,7 @@ def submit(pdf_path, printer_name, dry_run, dry_run_dir, copies=1,
     if dry_run:
         dry_run_dir = Path(dry_run_dir)
         dry_run_dir.mkdir(parents=True, exist_ok=True)
-        job_id = f"dry-run-{int(time.time() * 1000)}"
+        job_id = f"dry-run-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
         shutil.copy(pdf_path, dry_run_dir / f"{job_id}.pdf")
         return job_id
 

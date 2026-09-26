@@ -14,8 +14,10 @@ are needed on the phone or laptop.
 - **ID card copy**: photograph or upload the front and back of an ID card (Aadhaar, PAN,
   driving licence, bank card and similar), crop each one to the card's edges, and print both on one
   A4 page at real card size (85.6 × 54 mm), with an optional cutting guide.
-- **Print document**: upload a PDF, Word, Excel, PowerPoint, text or image file.
-  Check the page previews, then print with copies, a page range and one- or two-sided options.
+- **Print documents**: select one or several PDF, Word, Excel, PowerPoint, text or image files
+  at once (up to 20). Reorder or remove them, preview the pages, and optionally set a page range
+  for each document. Then print them all with shared copies and one- or two-sided settings.
+  Each document is sent as its own print job, in list order.
 - Mobile-first web UI with a sticky bottom action bar, a touch crop editor,
   dark mode and "add to home screen" support.
 - The Pi also shares the printer over CUPS/IPP, so computers can add it as a normal

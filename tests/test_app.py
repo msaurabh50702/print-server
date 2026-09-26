@@ -219,3 +219,45 @@ def test_passport_errors(client):
     full = client.post("/api/passport/pdf", data={"photo": (jpeg(), "a.jpg"), "size": "20x25", "count": "full"},
                        content_type="multipart/form-data")
     assert full.status_code == 200 and full.data.startswith(b"%PDF")
+
+
+def upload_image_doc(client, name="scan.jpg", color="red"):
+    resp = client.post("/api/documents", data={"file": (jpeg(color), name)},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    return resp.get_json()["id"]
+
+
+def test_batch_print_sends_one_job_per_document(client, app):
+    ids = [upload_image_doc(client, f"doc{i}.jpg") for i in range(3)]
+    resp = client.post("/api/documents/print", json={
+        "documents": [{"id": ids[2]}, {"id": ids[0], "pages": "1"}, {"id": ids[1], "pages": ""}],
+        "copies": 2, "duplex": True,
+    })
+    assert resp.status_code == 200, resp.get_json()
+    jobs = resp.get_json()["jobs"]
+    assert len(jobs) == 3 and len(set(jobs)) == 3
+    for job in jobs:
+        assert (app.config["DRY_RUN_DIR"] / f"{job}.pdf").exists()
+
+
+def test_batch_print_validates_everything_first(client, app):
+    good, bad = upload_image_doc(client), upload_image_doc(client, "two.jpg")
+    resp = client.post("/api/documents/print", json={
+        "documents": [{"id": good}, {"id": bad, "pages": "2-4"}]})
+    assert resp.status_code == 400
+    assert "two.jpg" in resp.get_json()["error"]
+    # Nothing was printed because one document had an invalid page range.
+    out = app.config["DRY_RUN_DIR"]
+    assert not out.exists() or not list(out.iterdir())
+
+
+def test_batch_print_rejects_bad_input(client):
+    assert client.post("/api/documents/print", json={}).status_code == 400
+    assert client.post("/api/documents/print", json={"documents": ["x"]}).status_code == 400
+    expired = client.post("/api/documents/print", json={"documents": [{"id": "0" * 32}]})
+    assert expired.status_code == 400 and "expired" in expired.get_json()["error"]
+    traversal = client.post("/api/documents/print", json={"documents": [{"id": "../../etc"}]})
+    assert traversal.status_code == 400
+    too_many = client.post("/api/documents/print", json={"documents": [{"id": "0" * 32}] * 21})
+    assert too_many.status_code == 400

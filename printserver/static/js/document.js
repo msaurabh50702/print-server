@@ -1,36 +1,66 @@
 "use strict";
 
 (() => {
+  const MAX_DOCS = window.MAX_DOCS || 20;
   const input = document.getElementById("doc-input");
+  const moreInput = document.getElementById("more-input");
   const dropzone = document.getElementById("dropzone");
   const progress = document.getElementById("upload-progress");
-  const pagesEl = document.getElementById("pages");
-  const rangeRow = document.getElementById("range-row");
-  const rangeInput = document.getElementById("pages-range");
-  let doc = null;  // { id, name, pages }
+  const list = document.getElementById("doc-list");
+  const template = document.getElementById("doc-item");
+  const printBtn = document.getElementById("print-doc");
+  let docs = [];  // { id, name, pages, el }
+  let uploading = false;
 
-  input.addEventListener("change", () => input.files[0] && upload(input.files[0]));
+  /* ---------- choosing files ---------- */
 
-  ["dragenter", "dragover"].forEach((t) => dropzone.addEventListener(t, (e) => {
+  input.addEventListener("change", () => addFiles(input.files, input));
+  moreInput.addEventListener("change", () => addFiles(moreInput.files, moreInput));
+
+  ["dragenter", "dragover"].forEach((t) => document.addEventListener(t, (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return;
     e.preventDefault();
     dropzone.classList.add("drag");
   }));
-  ["dragleave", "drop"].forEach((t) => dropzone.addEventListener(t, () => dropzone.classList.remove("drag")));
-  dropzone.addEventListener("drop", (e) => {
+  ["dragleave", "drop"].forEach((t) => document.addEventListener(t, () => dropzone.classList.remove("drag")));
+  document.addEventListener("drop", (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
     e.preventDefault();
-    if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+    addFiles(e.dataTransfer.files);
   });
 
-  document.getElementById("other-doc").addEventListener("click", () => {
-    input.value = "";
-    document.getElementById("step-preview").hidden = true;
-    document.getElementById("step-upload").hidden = false;
-  });
+  async function addFiles(fileList, fromInput) {
+    const files = [...fileList];
+    if (fromInput) fromInput.value = "";
+    if (!files.length || uploading) return;
+    const room = MAX_DOCS - docs.length;
+    if (room <= 0) {
+      toast(`You can print up to ${MAX_DOCS} documents at once`, "error");
+      return;
+    }
+    if (files.length > room) toast(`Only the first ${room} files were added (limit ${MAX_DOCS})`, "error");
 
-  document.querySelectorAll('input[name="range"]').forEach((r) => r.addEventListener("change", () => {
-    rangeRow.hidden = radioValue("range") !== "custom";
-    if (!rangeRow.hidden) rangeInput.focus();
-  }));
+    uploading = true;
+    printBtn.disabled = true;
+    const failed = [];
+    const batch = files.slice(0, room);
+    for (let i = 0; i < batch.length; i++) {
+      const label = batch.length > 1 ? `${i + 1} of ${batch.length}: ${batch[i].name}` : batch[i].name;
+      try {
+        const data = await upload(batch[i], (fraction) => setProgress(
+          fraction === null ? null : (i + fraction) / batch.length,
+          fraction === null ? `Preparing ${label}…` : `Uploading ${label}…`));
+        addDoc(data);
+      } catch (err) {
+        failed.push(`${batch[i].name}: ${err.message}`);
+      }
+    }
+    progress.hidden = true;
+    uploading = false;
+    printBtn.disabled = false;
+    if (failed.length) toast(failed.join(" · "), "error");
+    render();
+  }
 
   function setProgress(fraction, text) {
     progress.hidden = false;
@@ -39,46 +69,65 @@
     progress.querySelector(".progress-text").textContent = text;
   }
 
-  function upload(file) {
-    const form = new FormData();
-    form.append("file", file);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/documents");
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
-      const done = e.loaded / e.total;
-      if (done < 1) setProgress(done, `Uploading… ${Math.round(done * 100)}%`);
-      else setProgress(null, "Preparing preview…");
-    };
-    xhr.onload = () => {
-      progress.hidden = true;
-      let data = {};
-      try { data = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
-      if (xhr.status !== 200) {
-        toast(data.error || "Upload failed", "error");
-        input.value = "";
-        return;
-      }
-      showPreview(data);
-    };
-    xhr.onerror = () => { progress.hidden = true; toast("Upload failed. Is the server reachable?", "error"); };
-    setProgress(0, "Uploading…");
-    xhr.send(form);
+  function upload(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append("file", file);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/documents");
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded < e.total ? e.loaded / e.total : null);
+      };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+        if (xhr.status === 200) resolve(data);
+        else reject(new Error(data.error || "Upload failed"));
+      };
+      xhr.onerror = () => reject(new Error("Upload failed. Is the server reachable?"));
+      onProgress(0);
+      xhr.send(form);
+    });
   }
 
-  function showPreview(data) {
-    doc = data;
-    document.getElementById("step-upload").hidden = true;
-    document.getElementById("step-preview").hidden = false;
-    document.getElementById("doc-name").textContent = data.name;
-    document.getElementById("doc-pages").textContent = `${data.pages} page${data.pages === 1 ? "" : "s"}`;
-    document.getElementById("open-pdf").href = `/api/documents/${data.id}/pdf`;
-    rangeInput.value = "";
-    document.querySelector('input[name="range"][value="all"]').checked = true;
-    rangeRow.hidden = true;
+  /* ---------- list ---------- */
 
-    pagesEl.innerHTML = "";
-    for (let n = 1; n <= data.pages; n++) {
+  function pageUrl(doc, n) {
+    return `/api/documents/${doc.id}/page/${n}.png`;
+  }
+
+  function addDoc(data) {
+    const el = template.content.firstElementChild.cloneNode(true);
+    const doc = { ...data, el };
+    el.querySelector(".doc-title").textContent = data.name;
+    el.querySelector(".doc-pages").textContent = `${data.pages} page${data.pages === 1 ? "" : "s"}`;
+    el.querySelector('[data-act="open"]').href = `/api/documents/${data.id}/pdf`;
+    const thumb = el.querySelector(".doc-thumb img");
+    thumb.addEventListener("load", () => thumb.classList.add("loaded"), { once: true });
+    thumb.addEventListener("error", () => el.querySelector(".doc-thumb").classList.add("no-img"), { once: true });
+    thumb.src = pageUrl(doc, 1);
+
+    el.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-act]");
+      if (!btn || btn.dataset.act === "open") return;
+      const i = docs.indexOf(doc);
+      if (btn.dataset.act === "remove") docs.splice(i, 1);
+      else if (btn.dataset.act === "up" && i > 0) [docs[i - 1], docs[i]] = [docs[i], docs[i - 1]];
+      else if (btn.dataset.act === "down" && i < docs.length - 1) [docs[i + 1], docs[i]] = [docs[i], docs[i + 1]];
+      else if (btn.dataset.act === "preview") return togglePreview(doc);
+      render();
+    });
+    docs.push(doc);
+  }
+
+  function togglePreview(doc) {
+    const box = doc.el.querySelector(".doc-preview");
+    const label = doc.el.querySelector('.doc-links [data-act="preview"] span');
+    box.hidden = !box.hidden;
+    label.textContent = box.hidden ? "Preview pages" : "Hide preview";
+    const pages = box.querySelector(".pages");
+    if (box.hidden || pages.childElementCount) return;
+    for (let n = 1; n <= doc.pages; n++) {
       const fig = document.createElement("figure");
       fig.className = "page-thumb";
       const btn = document.createElement("button");
@@ -91,14 +140,31 @@
       img.addEventListener("error", () => {
         btn.outerHTML = `<div class="no-preview">Preview not available.<br>Use “Open PDF” to view.</div>`;
       }, { once: true });
-      img.src = `/api/documents/${data.id}/page/${n}.png`;
+      img.src = pageUrl(doc, n);
       btn.addEventListener("click", () => zoom(img.src));
       btn.appendChild(img);
       const cap = document.createElement("figcaption");
       cap.textContent = `Page ${n}`;
       fig.append(btn, cap);
-      pagesEl.appendChild(fig);
+      pages.appendChild(fig);
     }
+  }
+
+  function render() {
+    const hasDocs = docs.length > 0;
+    document.getElementById("step-upload").hidden = hasDocs;
+    document.getElementById("step-preview").hidden = !hasDocs;
+    // Re-appending existing nodes reorders them without losing input values.
+    docs.forEach((doc, i) => {
+      doc.el.querySelector('[data-act="up"]').disabled = i === 0;
+      doc.el.querySelector('[data-act="down"]').disabled = i === docs.length - 1;
+      list.appendChild(doc.el);
+    });
+    [...list.children].forEach((el) => { if (!docs.some((d) => d.el === el)) el.remove(); });
+    const pages = docs.reduce((sum, d) => sum + d.pages, 0);
+    document.getElementById("doc-summary").textContent =
+      `${docs.length} document${docs.length === 1 ? "" : "s"} · ${pages} page${pages === 1 ? "" : "s"}`;
+    document.getElementById("print-label").textContent = docs.length > 1 ? `Print all (${docs.length})` : "Print";
   }
 
   function zoom(src) {
@@ -115,28 +181,24 @@
     document.body.appendChild(view);
   }
 
-  const printBtn = document.getElementById("print-doc");
+  /* ---------- print ---------- */
+
   printBtn.addEventListener("click", async () => {
-    if (!doc) return;
-    const custom = radioValue("range") === "custom";
-    if (custom && !rangeInput.value.trim()) {
-      toast("Enter the page numbers to print", "error");
-      rangeInput.focus();
-      return;
-    }
+    if (!docs.length || uploading) return;
     setBusy(printBtn, true);
     try {
-      const res = await fetch(`/api/documents/${doc.id}/print`, {
+      const res = await fetch("/api/documents/print", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          documents: docs.map((d) => ({ id: d.id, pages: d.el.querySelector(".doc-range").value })),
           copies: document.getElementById("copies").value || 1,
-          pages: custom ? rangeInput.value : "",
           duplex: radioValue("sides") === "two",
         }),
       });
       if (!res.ok) throw new Error(await readError(res));
-      toast("Sent to printer", "success");
+      const { jobs } = await res.json();
+      toast(jobs.length > 1 ? `Sent ${jobs.length} documents to printer` : "Sent to printer", "success");
       refreshStatus();
     } catch (err) {
       toast(err.message, "error");

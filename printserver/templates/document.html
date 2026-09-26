@@ -1,37 +1,37 @@
 {% extends "base.html" %}
-{% block title %}Print document{% endblock %}
-{% block heading %}Print document{% endblock %}
+{% block title %}Print documents{% endblock %}
+{% block heading %}Print documents{% endblock %}
 {% block content %}
 
 <section id="step-upload" class="fade-in">
   <label class="dropzone" id="dropzone">
-    <input id="doc-input" type="file" accept="{{ accept }}">
+    <input id="doc-input" type="file" accept="{{ accept }}" multiple>
     <span class="drop-icon">{{ icon("upload") }}</span>
-    <strong>Choose a document</strong>
-    <span class="hint">PDF, Word, Excel, PowerPoint, text or image</span>
+    <strong>Choose documents</strong>
+    <span class="hint">Select one or several files: PDF, Word, Excel, PowerPoint, text or images</span>
     <span class="btn primary small as-btn">Browse files</span>
   </label>
-  <div id="upload-progress" class="progress" hidden>
-    <div class="bar"><i></i></div>
-    <span class="progress-text">Uploading&hellip;</span>
-  </div>
 </section>
 
+<div id="upload-progress" class="progress" hidden>
+  <div class="bar"><i></i></div>
+  <span class="progress-text">Uploading&hellip;</span>
+</div>
+
 <section id="step-preview" class="fade-in" hidden>
-  <div class="doc-head card">
-    <span class="choice-icon docs small">{{ icon("doc") }}</span>
-    <div class="doc-meta">
-      <strong id="doc-name"></strong>
-      <span id="doc-pages" class="hint"></span>
-    </div>
-    <button id="other-doc" class="chip" type="button">{{ icon("swap") }}<span>Change</span></button>
+  <div class="grid-head">
+    <p class="hint" id="doc-summary"></p>
+    <label class="chip add-more">
+      <input id="more-input" type="file" accept="{{ accept }}" multiple>
+      {{ icon("plus") }}<span>Add more</span>
+    </label>
   </div>
 
-  <div id="pages" class="pages" aria-label="Page preview"></div>
+  <ol id="doc-list" class="doc-list" aria-label="Documents to print"></ol>
 
   <div class="card options">
     <div class="option">
-      <span class="option-label">Copies</span>
+      <span class="option-label">Copies <small class="hint">(each document)</small></span>
       <div class="stepper">
         <button type="button" data-step="-1" aria-label="Fewer copies">&minus;</button>
         <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Copies">
@@ -45,25 +45,42 @@
         <label><input type="radio" name="sides" value="two"><span>Two-sided</span></label>
       </div>
     </div>
-    <div class="option">
-      <span class="option-label">Pages</span>
-      <div class="segmented" role="radiogroup" aria-label="Pages">
-        <label><input type="radio" name="range" value="all" checked><span>All</span></label>
-        <label><input type="radio" name="range" value="custom"><span>Custom</span></label>
-      </div>
-    </div>
-    <div class="option" id="range-row" hidden>
-      <label class="option-label" for="pages-range">Page numbers</label>
-      <input id="pages-range" class="field" type="text" placeholder="e.g. 1-3, 5" inputmode="numeric" autocomplete="off">
-    </div>
   </div>
 
   <div class="action-bar">
-    <a id="open-pdf" class="btn ghost" target="_blank" rel="noopener" aria-label="Open PDF">{{ icon("open") }}<span class="hide-sm">Open PDF</span></a>
-    <button id="print-doc" class="btn primary grow" type="button">{{ icon("print") }}<span>Print</span></button>
+    <button id="print-doc" class="btn primary grow" type="button">{{ icon("print") }}<span id="print-label">Print</span></button>
   </div>
 </section>
+
+<template id="doc-item">
+  <li class="doc-item card">
+    <div class="doc-row">
+      <button class="doc-thumb" type="button" data-act="preview" aria-label="Preview pages">
+        <img alt="" loading="lazy">
+      </button>
+      <div class="doc-info">
+        <strong class="doc-title"></strong>
+        <span class="hint doc-pages"></span>
+        <input class="field doc-range" type="text" inputmode="numeric" autocomplete="off"
+               placeholder="All pages" aria-label="Pages to print, e.g. 1-3, 5" title="Pages to print, e.g. 1-3, 5">
+      </div>
+      <div class="doc-actions">
+        <button class="icon-btn" type="button" data-act="up" aria-label="Move up">{{ icon("up") }}</button>
+        <button class="icon-btn" type="button" data-act="down" aria-label="Move down">{{ icon("down") }}</button>
+        <button class="icon-btn danger" type="button" data-act="remove" aria-label="Remove">{{ icon("trash") }}</button>
+      </div>
+    </div>
+    <div class="doc-preview" hidden>
+      <div class="pages"></div>
+    </div>
+    <div class="doc-links">
+      <button class="link-btn" type="button" data-act="preview">{{ icon("eye") }}<span>Preview pages</span></button>
+      <a class="link-btn" target="_blank" rel="noopener" data-act="open">{{ icon("open") }}<span>Open PDF</span></a>
+    </div>
+  </li>
+</template>
 {% endblock %}
 {% block scripts %}
+<script>window.MAX_DOCS = {{ max_batch }};</script>
 <script src="{{ url_for('static', filename='js/document.js') }}"></script>
 {% endblock %}

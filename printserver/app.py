@@ -12,6 +12,7 @@ from . import documents, photos, printing
 from .config import Config
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+MAX_BATCH = 20
 
 
 def create_app(config=None):
@@ -95,7 +96,8 @@ def create_app(config=None):
 
     @app.get("/document")
     def document_page():
-        return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)))
+        return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)),
+                               max_batch=MAX_BATCH)
 
     # ---------- API ----------
 
@@ -234,24 +236,53 @@ def create_app(config=None):
     def document_pdf(job_id):
         return send_file(job_dir(job_id) / "document.pdf", mimetype="application/pdf")
 
+    def document_name(path):
+        name_file = path / "name.txt"
+        return name_file.read_text() if name_file.exists() else "Document"
+
+    def prepare_document(job_id, pages):
+        """Validate one document and its page range. Returns (pdf, ranges, name)."""
+        if not JOB_ID_RE.match(str(job_id)) or not (jobs_dir / job_id / "document.pdf").exists():
+            raise printing.PrintError("A document has expired. Please upload it again.")
+        path = jobs_dir / job_id
+        pdf = path / "document.pdf"
+        name = document_name(path)
+        try:
+            ranges = printing.parse_page_ranges(pages, documents.page_count(pdf))
+        except ValueError as exc:
+            raise printing.PrintError(f"{name}: {exc}")
+        return pdf, ranges, name
+
+    def print_documents(items, options):
+        # Validate everything before sending anything, so a bad page range
+        # doesn't leave half the batch printed.
+        prepared = [prepare_document(item.get("id"), item.get("pages")) for item in items]
+        copies = int_arg(options.get("copies"), 1, 1, 99)
+        duplex = bool(options.get("duplex"))
+        fit = bool(options.get("fit_to_page", True))
+        # One CUPS job per document keeps them in order and stops two-sided
+        # printing from putting one document on the back of another.
+        return [submit(pdf, copies=copies, page_ranges=ranges, duplex=duplex,
+                       fit_to_page=fit, title=name)
+                for pdf, ranges, name in prepared]
+
     @app.post("/api/documents/<job_id>/print")
     def document_print(job_id):
-        path = job_dir(job_id)
-        pdf = path / "document.pdf"
+        job_dir(job_id)
         options = request.get_json(silent=True) or {}
-        try:
-            ranges = printing.parse_page_ranges(options.get("pages"), documents.page_count(pdf))
-        except ValueError as exc:
-            raise printing.PrintError(str(exc))
-        name_file = path / "name.txt"
-        job = submit(
-            pdf,
-            copies=int_arg(options.get("copies"), 1, 1, 99),
-            page_ranges=ranges,
-            duplex=bool(options.get("duplex")),
-            fit_to_page=bool(options.get("fit_to_page", True)),
-            title=name_file.read_text() if name_file.exists() else "Document",
-        )
-        return jsonify(job=job)
+        jobs = print_documents([{"id": job_id, "pages": options.get("pages")}], options)
+        return jsonify(job=jobs[0])
+
+    @app.post("/api/documents/print")
+    def documents_print_batch():
+        options = request.get_json(silent=True) or {}
+        items = options.get("documents")
+        if not isinstance(items, list) or not items:
+            raise printing.PrintError("Add at least one document")
+        if len(items) > MAX_BATCH:
+            raise printing.PrintError(f"You can print up to {MAX_BATCH} documents at once")
+        if not all(isinstance(item, dict) for item in items):
+            raise printing.PrintError("Invalid document list")
+        return jsonify(jobs=print_documents(items, options))
 
     return app
