@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Passport photos{% endblock %}
+{% block heading %}Passport photos{% endblock %}
+{% block content %}
+
+<section class="fade-in">
+  <div class="pp-top">
+    <button id="pp-slot" class="pp-slot" type="button" aria-label="Add photo">
+      <span class="id-empty">
+        <span class="plus" aria-hidden="true">+</span>
+        <span>Add photo</span>
+      </span>
+    </button>
+    <div class="pp-tips">
+      <strong>For a good passport photo</strong>
+      <ul>
+        <li>Plain white or light background</li>
+        <li>Face the camera, eyes open, neutral expression</li>
+        <li>Even light, no shadows on the face</li>
+        <li>Crop so the face fits the oval guide</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="section-title pp-title">Photo size</h2>
+  <div class="size-list" role="radiogroup" aria-label="Photo size">
+    {% for s in sizes %}
+    <label class="size-opt">
+      <input type="radio" name="size" value="{{ s.id }}" {{ "checked" if loop.first }}>
+      <span class="size-shape" style="--w: {{ s.w_mm }}; --h: {{ s.h_mm }};"></span>
+      <span class="size-text"><strong>{{ s.label }}</strong><small>{{ s.use }}</small></span>
+    </label>
+    {% endfor %}
+  </div>
+
+  <div class="card options">
+    <div class="option">
+      <span class="option-label">Photos on page</span>
+      <div class="segmented" role="radiogroup" aria-label="Photos on page">
+        {% for c in counts %}
+        <label><input type="radio" name="count" value="{{ c }}" {{ "checked" if loop.first }}><span>{{ c }}</span></label>
+        {% endfor %}
+        <label><input type="radio" name="count" value="full"><span id="full-label">Full</span></label>
+      </div>
+    </div>
+    <div class="option">
+      <span class="option-label">Cutting guide</span>
+      <div class="segmented" role="radiogroup" aria-label="Cutting guide">
+        <label><input type="radio" name="outline" value="1" checked><span>On</span></label>
+        <label><input type="radio" name="outline" value="0"><span>Off</span></label>
+      </div>
+    </div>
+    <div class="option">
+      <span class="option-label">Copies</span>
+      <div class="stepper">
+        <button type="button" data-step="-1" aria-label="Fewer copies">&minus;</button>
+        <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Copies">
+        <button type="button" data-step="1" aria-label="More copies">+</button>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title pp-title">Page preview</h2>
+  <div class="page-wrap">
+    <div id="pp-sheet" class="sheet pp-sheet" aria-label="Page preview"></div>
+  </div>
+  <p class="hint id-size" id="pp-summary"></p>
+
+  <div class="action-bar">
+    <button id="download-pdf" class="btn ghost" type="button" aria-label="Download PDF">{{ icon("download") }}<span class="hide-sm">PDF</span></button>
+    <button id="print-pp" class="btn primary grow" type="button">{{ icon("print") }}<span>Print</span></button>
+  </div>
+</section>
+
+<input id="file-input" type="file" accept="image/*" hidden>
+{% include "_editor.html" %}
+{% endblock %}
+{% block scripts %}
+<script>
+  window.PP_SIZES = {{ sizes|tojson }};
+  window.SHEET = {{ sheet|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/passport.js') }}"></script>
+{% endblock %}

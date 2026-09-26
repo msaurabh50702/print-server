@@ -7,7 +7,8 @@ from PIL import Image
 from pypdf import PdfReader
 
 from printserver import create_app
-from printserver.photos import ID_CARD_MM, LAYOUTS, compose_id_card, compose_sheet
+from printserver.photos import (ID_CARD_MM, LAYOUTS, PASSPORT_SIZES, compose_id_card, compose_passport,
+                                compose_sheet, passport_grid)
 from printserver.printing import parse_page_ranges
 
 
@@ -30,7 +31,7 @@ def jpeg(color="red", size=(400, 300)):
 
 
 def test_pages_render(client):
-    for url in ("/", "/photos", "/id-card", "/document"):
+    for url in ("/", "/photos", "/passport", "/id-card", "/document"):
         assert client.get(url).status_code == 200
 
 
@@ -172,3 +173,49 @@ def test_id_card_pdf_and_missing_photo(client):
     assert resp.status_code == 200 and resp.data.startswith(b"%PDF")
     resp = client.post("/api/id-card/print", data={})
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("size_id", list(PASSPORT_SIZES))
+def test_passport_real_size_and_count(size_id):
+    dpi = 100
+    w_mm, h_mm = PASSPORT_SIZES[size_id][:2]
+    cols, rows = passport_grid(size_id, 5, 3)
+    assert cols >= 3 and rows >= 4
+    page, total = compose_passport(jpeg("red", (350, 450)), size_id, None, 5, 3, dpi=dpi, outline=False)
+    assert total == cols * rows
+    # First photo starts at the top-left margin, exactly the requested size.
+    margin_px = round(5 / 25.4 * dpi)
+    row = [page.getpixel((x, margin_px + 3)) for x in range(margin_px, margin_px + 400)]
+    width = next(i for i, px in enumerate(row) if px == (255, 255, 255))
+    assert abs(width - round(w_mm / 25.4 * dpi)) <= 1
+    col = [page.getpixel((margin_px + 3, y)) for y in range(margin_px, margin_px + 400)]
+    height = next(i for i, px in enumerate(col) if px == (255, 255, 255))
+    assert abs(height - round(h_mm / 25.4 * dpi)) <= 1
+
+
+def test_passport_count_is_clamped():
+    _, total = compose_passport(jpeg(), "51x51", 999, 5, 3, dpi=50)
+    cols, rows = passport_grid("51x51", 5, 3)
+    assert total == cols * rows
+    _, total = compose_passport(jpeg(), "35x45", 8, 5, 3, dpi=50)
+    assert total == 8
+
+
+def test_passport_print_dry_run(client, app):
+    resp = client.post("/api/passport/print", data={
+        "photo": (jpeg(), "me.jpg"), "size": "35x45", "count": "8", "copies": "1",
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    out = app.config["DRY_RUN_DIR"] / f"{resp.get_json()['job']}.pdf"
+    page = PdfReader(str(out)).pages[0]
+    assert round(float(page.mediabox.width) / 72 * 25.4) == 210
+
+
+def test_passport_errors(client):
+    assert client.post("/api/passport/print", data={"size": "35x45"}).status_code == 400
+    bad = client.post("/api/passport/pdf", data={"photo": (jpeg(), "a.jpg"), "size": "1x1"},
+                      content_type="multipart/form-data")
+    assert bad.status_code == 400
+    full = client.post("/api/passport/pdf", data={"photo": (jpeg(), "a.jpg"), "size": "20x25", "count": "full"},
+                       content_type="multipart/form-data")
+    assert full.status_code == 200 and full.data.startswith(b"%PDF")

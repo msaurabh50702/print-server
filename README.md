@@ -8,6 +8,9 @@ are needed on the phone or laptop.
 - **Print photos**: pick how many photos go on one A4 page (1, 2, 4, 6, 8, 9, 12 or 16).
   Tap each box in the grid to add a photo, then crop, rotate, change or remove it.
   "Fill all" repeats one photo in every empty box, which is handy for passport-style sheets.
+- **Passport photos**: add one photo, crop it with a face-position oval guide, pick the size
+  (35 × 45 mm for India/UK/EU, 2 × 2 in for the US, or 20 × 25 mm stamp size) and how many
+  (4, 8, 12 or a full page). Photos are tiled at real size from the top-left corner with cutting guides.
 - **ID card copy**: photograph or upload the front and back of an ID card (Aadhaar, PAN,
   driving licence, bank card and similar), crop each one to the card's edges, and print both on one
   A4 page at real card size (85.6 × 54 mm), with an optional cutting guide.
@@ -97,6 +100,8 @@ pytest
 - The ID card page reuses the same editor, locked to the ID-1 card shape. `compose_id_card` in
   `photos.py` places the front in the top half and the back in the bottom half at 85.6 × 54 mm.
   Jobs are sent without fit-to-page scaling, so the copy prints at 100%.
+- `compose_passport` tiles one photo at its exact size. Sizes are defined in `PASSPORT_SIZES`
+  in `photos.py`, so it's easy to add another country's size.
 - `printserver/documents.py` converts uploads to PDF (LibreOffice for Office files, Pillow for images)
   and renders page previews with `pdftoppm`.
 - `printserver/printing.py` sends jobs to CUPS with `lp`

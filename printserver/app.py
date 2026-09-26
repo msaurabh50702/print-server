@@ -86,6 +86,13 @@ def create_app(config=None):
         card = {"w_mm": photos.ID_CARD_MM[0], "h_mm": photos.ID_CARD_MM[1]}
         return render_template("idcard.html", card=card)
 
+    @app.get("/passport")
+    def passport_page():
+        sizes = photos.passport_sizes_for_client(app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"])
+        sheet = {"margin_mm": app.config["PAGE_MARGIN_MM"], "gap_mm": app.config["CELL_GAP_MM"],
+                 "page_w_mm": photos.A4_MM[0], "page_h_mm": photos.A4_MM[1]}
+        return render_template("passport.html", sizes=sizes, counts=photos.PASSPORT_COUNTS, sheet=sheet)
+
     @app.get("/document")
     def document_page():
         return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)))
@@ -161,6 +168,38 @@ def create_app(config=None):
         pdf_path = compose_id_card_request()
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
         return jsonify(job=submit(pdf_path, copies=copies, title="ID card copy"))
+
+    def compose_passport_request():
+        photo = request.files.get("photo")
+        if not photo:
+            raise printing.PrintError("Add a photo first")
+        size = request.form.get("size", "")
+        if size not in photos.PASSPORT_SIZES:
+            raise printing.PrintError("Unknown photo size")
+        count_arg = request.form.get("count", "full")
+        count = None if count_arg == "full" else int_arg(count_arg, 1, 1, 999)
+        outline = request.form.get("outline", "1") != "0"
+        try:
+            page, _ = photos.compose_passport(
+                photo.stream, size, count, app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"],
+                app.config["PHOTO_DPI"], outline)
+        except (ValueError, OSError) as exc:
+            raise printing.PrintError(f"Could not read photo: {exc}")
+        _, path = new_job_dir()
+        pdf_path = path / "document.pdf"
+        photos.save_pdf(page, pdf_path, app.config["PHOTO_DPI"])
+        return pdf_path
+
+    @app.post("/api/passport/pdf")
+    def passport_pdf():
+        return send_file(compose_passport_request(), mimetype="application/pdf",
+                         as_attachment=True, download_name="passport-photos.pdf")
+
+    @app.post("/api/passport/print")
+    def passport_print():
+        pdf_path = compose_passport_request()
+        copies = int_arg(request.form.get("copies"), 1, 1, 99)
+        return jsonify(job=submit(pdf_path, copies=copies, title="Passport photos"))
 
     @app.post("/api/documents")
     def upload_document():

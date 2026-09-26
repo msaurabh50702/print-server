@@ -103,3 +103,59 @@ def compose_id_card(front, back=None, dpi=300, outline=True):
                 [x - pad, y - pad, x + card_w + pad - 1, y + card_h + pad - 1],
                 outline=(170, 170, 170), width=pad)
     return page
+
+
+# id -> (width_mm, height_mm, label, used for)
+PASSPORT_SIZES = {
+    "35x45": (35.0, 45.0, "35 × 45 mm", "India, UK, EU passport & visa"),
+    "51x51": (51.0, 51.0, "2 × 2 in", "US passport & visa"),
+    "20x25": (20.0, 25.0, "20 × 25 mm", "Stamp size for forms"),
+}
+PASSPORT_COUNTS = (4, 8, 12)
+
+
+def passport_grid(size_id, margin_mm, gap_mm):
+    """Return (cols, rows) of photos that fit on an A4 page."""
+    w, h = PASSPORT_SIZES[size_id][:2]
+    cols = int((A4_MM[0] - 2 * margin_mm + gap_mm) // (w + gap_mm))
+    rows = int((A4_MM[1] - 2 * margin_mm + gap_mm) // (h + gap_mm))
+    return cols, rows
+
+
+def passport_sizes_for_client(margin_mm, gap_mm):
+    result = []
+    for size_id, (w, h, label, use) in PASSPORT_SIZES.items():
+        cols, rows = passport_grid(size_id, margin_mm, gap_mm)
+        result.append({"id": size_id, "w_mm": w, "h_mm": h, "label": label, "use": use,
+                       "cols": cols, "rows": rows, "max": cols * rows})
+    return result
+
+
+def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline=True):
+    """Tile one photo at real passport size from the top-left of an A4 page.
+
+    count: number of photos, or None for a full page.
+    """
+    if size_id not in PASSPORT_SIZES:
+        raise ValueError(f"Unknown passport size '{size_id}'")
+    w_mm, h_mm = PASSPORT_SIZES[size_id][:2]
+    cols, rows = passport_grid(size_id, margin_mm, gap_mm)
+    total = cols * rows if count is None else max(1, min(int(count), cols * rows))
+
+    page = Image.new("RGB", (_mm_to_px(A4_MM[0], dpi), _mm_to_px(A4_MM[1], dpi)), "white")
+    photo_w, photo_h = _mm_to_px(w_mm, dpi), _mm_to_px(h_mm, dpi)
+    with Image.open(source) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img = ImageOps.fit(img, (photo_w, photo_h), Image.LANCZOS)
+
+    draw = ImageDraw.Draw(page)
+    pad = max(1, dpi // 150)
+    for i in range(total):
+        col, row = i % cols, i // cols
+        x = _mm_to_px(margin_mm + col * (w_mm + gap_mm), dpi)
+        y = _mm_to_px(margin_mm + row * (h_mm + gap_mm), dpi)
+        page.paste(img, (x, y))
+        if outline:
+            draw.rectangle([x - pad, y - pad, x + photo_w + pad - 1, y + photo_h + pad - 1],
+                           outline=(170, 170, 170), width=pad)
+    return page, total

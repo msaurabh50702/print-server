@@ -453,3 +453,47 @@ button { cursor: pointer; }
 .id-slot.filled { border: 1px solid #c7cbe0; background: #fff; }
 .id-slot img { width: 100%; height: 100%; object-fit: cover; display: block; animation: fade-in .3s var(--ease); }
 .id-size { text-align: center; margin-top: 10px; font-size: .82rem; }
+
+/* ==========================================================================
+   Passport photos
+   ========================================================================== */
+.choice-icon.passport { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+.pp-top { display: flex; gap: 16px; align-items: center; margin: 16px 0 8px; }
+.pp-slot {
+  flex: none; width: clamp(110px, 32vw, 160px); aspect-ratio: var(--ar, .78);
+  display: grid; place-items: center; overflow: hidden; padding: 0;
+  border: 1.5px dashed #c7cbe0; border-radius: 10px; background: var(--surface); color: var(--muted);
+  box-shadow: var(--shadow-sm); transition: border-color .15s, color .15s, aspect-ratio .2s;
+}
+.pp-slot:hover { border-color: var(--accent); color: var(--accent); }
+.pp-slot.filled { border: 0; box-shadow: var(--shadow); }
+.pp-slot img { width: 100%; height: 100%; object-fit: cover; display: block; animation: fade-in .3s var(--ease); }
+.pp-slot .plus {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--surface-2); font-size: 1.2rem;
+}
+.pp-tips { font-size: .88rem; color: var(--muted); }
+.pp-tips strong { color: var(--text); }
+.pp-tips ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+.pp-title { margin: 22px 0 12px; font-size: 1.1rem; }
+
+.size-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.size-opt {
+  position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color .15s, background .15s;
+}
+.size-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.size-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.size-opt:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+.size-shape {
+  flex: none; height: 34px; aspect-ratio: var(--w) / var(--h);
+  border: 2px solid var(--muted); border-radius: 3px;
+}
+.size-opt:has(input:checked) .size-shape { border-color: var(--accent); background: var(--accent-soft); }
+.size-text { display: grid; }
+.size-text small { color: var(--muted); font-size: .8rem; }
+
+.pp-sheet { position: relative; display: block; width: min(100%, 420px); }
+.pp-tile { position: absolute; overflow: hidden; background: #eef0f7; outline: 1px solid #c9ccd6; }
+.pp-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }

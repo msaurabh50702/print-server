@@ -109,7 +109,7 @@ class PhotoEditor {
     });
   }
 
-  /* opts: { file, state, aspect, isNew, onDone(result), onAll(result)?, onRemove(), onReplace(), onCancel() }
+  /* opts: { file, state, aspect, isNew, faceGuide?, onDone(result), onAll(result)?, onRemove(), onReplace(), onCancel() }
      "Fill all" is only shown when onAll is given. */
   async open(opts) {
     this.opts = opts;
@@ -122,6 +122,9 @@ class PhotoEditor {
     document.getElementById("ed-remove").hidden = !!opts.isNew;
     document.getElementById("ed-replace").hidden = !!opts.isNew;
     document.getElementById("ed-all").hidden = !opts.onAll;
+    document.getElementById("ed-hint").textContent = opts.faceGuide
+      ? "Fit the face inside the oval. Drag a corner to zoom."
+      : "Drag the box to move it. Drag a corner to resize.";
     this.modal.hidden = false;
     this.modal.classList.add("loading");
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -229,6 +232,19 @@ class PhotoEditor {
     ctx.strokeStyle = "#fff";
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, w, h);
+
+    if (this.opts.faceGuide) {
+      // Where the head should sit on a passport photo: roughly 70% of the
+      // height from chin to crown, centred horizontally.
+      ctx.save();
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h * 0.46, w * 0.29, h * 0.35, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Corner handles.
     const s = 18;
