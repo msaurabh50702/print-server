@@ -144,6 +144,7 @@
     form.append("layout", layout.id);
     form.append("fit", fitMode());
     form.append("copies", document.getElementById("copies").value || "1");
+    appendPrintTarget(form);
     let count = 0;
     cells.forEach((c, i) => { if (c) { form.append(`cell${i}`, c.blob, `cell${i}.jpg`); count++; } });
     if (!count) { toast("Tap a box to add a photo first", "error"); return null; }
@@ -170,7 +171,7 @@
   printBtn.addEventListener("click", async () => {
     const res = await send("/api/photos/print", printBtn);
     if (res) {
-      toast("Sent to printer", "success");
+      toast(sentMessage(), "success");
       refreshStatus();
     }
   });

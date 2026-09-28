@@ -98,6 +98,7 @@
     form.append("count", radioValue("count"));
     form.append("outline", radioValue("outline"));
     form.append("copies", document.getElementById("copies").value || "1");
+    appendPrintTarget(form);
     return form;
   }
 
@@ -120,7 +121,7 @@
   const printBtn = document.getElementById("print-pp");
   printBtn.addEventListener("click", async () => {
     if (await send("/api/passport/print", printBtn)) {
-      toast("Sent to printer", "success");
+      toast(sentMessage(), "success");
       refreshStatus();
     }
   });

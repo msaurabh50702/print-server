@@ -23,7 +23,7 @@
     <span class="brand-mark">{{ icon("print") }}</span>
     {% endif %}
     <h1>{% block heading %}Home Printer{% endblock %}</h1>
-    <span id="printer-status" class="status"><i class="dot"></i><span class="status-text">Checking&hellip;</span></span>
+    <a id="printer-status" class="status" href="{{ url_for('queue_page') }}" aria-label="Printer status and print queue"><i class="dot"></i><span class="status-text">Checking&hellip;</span></a>
   </header>
   <main class="container">
     {% block content %}{% endblock %}

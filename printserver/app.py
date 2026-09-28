@@ -9,6 +9,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 from . import documents, photos, printing
+from .history import JobHistory
 from .config import Config
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -24,6 +25,7 @@ def create_app(config=None):
     data_dir = Path(app.config["DATA_DIR"])
     jobs_dir = data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
+    history = JobHistory(data_dir / "history.json")
 
     def cleanup_old_jobs():
         cutoff = time.time() - app.config["JOB_TTL_SECONDS"]
@@ -49,10 +51,21 @@ def create_app(config=None):
             abort(404)
         return path
 
-    def submit(pdf_path, **kwargs):
-        return printing.submit(
-            pdf_path, app.config["PRINTER_NAME"], app.config["DRY_RUN"],
-            app.config["DRY_RUN_DIR"], **kwargs)
+    def print_target(options):
+        """(printer, colour mode) chosen in the UI, validated against CUPS."""
+        printer = printing.resolve_printer(
+            str(options.get("printer") or "").strip(), app.config["PRINTER_NAME"],
+            app.config["DRY_RUN"])
+        color = "mono" if options.get("color") == "mono" else "color"
+        return printer, color
+
+    def submit(pdf_path, target, title, copies=1, **kwargs):
+        printer, color = target
+        job = printing.submit(
+            pdf_path, printer, app.config["DRY_RUN"], app.config["DRY_RUN_DIR"],
+            copies=copies, title=title, color=color, **kwargs)
+        history.add(job, printer, title, copies)
+        return job
 
     def int_arg(value, default, low, high):
         try:
@@ -94,6 +107,10 @@ def create_app(config=None):
                  "page_w_mm": photos.A4_MM[0], "page_h_mm": photos.A4_MM[1]}
         return render_template("passport.html", sizes=sizes, counts=photos.PASSPORT_COUNTS, sheet=sheet)
 
+    @app.get("/queue")
+    def queue_page():
+        return render_template("queue.html")
+
     @app.get("/document")
     def document_page():
         return render_template("document.html", accept=",".join(sorted(documents.ALLOWED_EXTS)),
@@ -103,10 +120,46 @@ def create_app(config=None):
 
     @app.get("/api/status")
     def status():
-        info = printing.printer_status(app.config["PRINTER_NAME"])
+        info = printing.printer_status(
+            request.args.get("printer", ""), app.config["PRINTER_NAME"], app.config["DRY_RUN"])
         if app.config["DRY_RUN"]:
-            info.update(ok=True, dry_run=True, message="Dry-run mode: jobs are saved, not printed")
+            info.update(dry_run=True, message="Dry-run mode: jobs are saved, not printed")
         return jsonify(info)
+
+    @app.get("/api/printers")
+    def printers_list():
+        printers = printing.list_printers(app.config["DRY_RUN"])
+        try:
+            default = printing.resolve_printer("", app.config["PRINTER_NAME"], app.config["DRY_RUN"])
+        except printing.PrintError:
+            default = None
+        return jsonify(printers=printers, default=default)
+
+    @app.get("/api/queue")
+    def queue_list():
+        names = [p["name"] for p in printing.list_printers(app.config["DRY_RUN"])]
+        active = [] if app.config["DRY_RUN"] else printing.active_jobs(names)
+        by_id = {job["id"]: job for job in active}
+        recent = []
+        for entry in history.recent():
+            job = by_id.get(entry["id"])
+            if job:
+                # lpq may shorten titles; the app's own record has the full one.
+                job["title"] = entry["title"]
+                job["time"] = entry["time"]
+                continue
+            state = "cancelled" if entry.get("cancelled") else "done"
+            recent.append({**entry, "state": state})
+        return jsonify(active=active, recent=recent[:20])
+
+    @app.post("/api/queue/<job_id>/cancel")
+    def queue_cancel(job_id):
+        if app.config["DRY_RUN"]:
+            raise printing.PrintError("Test mode: jobs are saved as PDFs, nothing to cancel")
+        names = [p["name"] for p in printing.list_printers()]
+        printing.cancel_job(job_id, names)
+        history.mark_cancelled(job_id)
+        return jsonify(ok=True)
 
     def compose_photo_request():
         layout = request.form.get("layout", "")
@@ -139,9 +192,10 @@ def create_app(config=None):
 
     @app.post("/api/photos/print")
     def photos_print():
+        target = print_target(request.form)  # check the printer before the slow work
         pdf_path = compose_photo_request()
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
-        job = submit(pdf_path, copies=copies, title="Photos")
+        job = submit(pdf_path, target, "Photos", copies=copies)
         return jsonify(job=job)
 
     def compose_id_card_request():
@@ -167,9 +221,10 @@ def create_app(config=None):
 
     @app.post("/api/id-card/print")
     def id_card_print():
+        target = print_target(request.form)
         pdf_path = compose_id_card_request()
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
-        return jsonify(job=submit(pdf_path, copies=copies, title="ID card copy"))
+        return jsonify(job=submit(pdf_path, target, "ID card copy", copies=copies))
 
     def compose_passport_request():
         photo = request.files.get("photo")
@@ -199,9 +254,10 @@ def create_app(config=None):
 
     @app.post("/api/passport/print")
     def passport_print():
+        target = print_target(request.form)
         pdf_path = compose_passport_request()
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
-        return jsonify(job=submit(pdf_path, copies=copies, title="Passport photos"))
+        return jsonify(job=submit(pdf_path, target, "Passport photos", copies=copies))
 
     @app.post("/api/documents")
     def upload_document():
@@ -256,14 +312,15 @@ def create_app(config=None):
     def print_documents(items, options):
         # Validate everything before sending anything, so a bad page range
         # doesn't leave half the batch printed.
+        target = print_target(options)
         prepared = [prepare_document(item.get("id"), item.get("pages")) for item in items]
         copies = int_arg(options.get("copies"), 1, 1, 99)
         duplex = bool(options.get("duplex"))
         fit = bool(options.get("fit_to_page", True))
         # One CUPS job per document keeps them in order and stops two-sided
         # printing from putting one document on the back of another.
-        return [submit(pdf, copies=copies, page_ranges=ranges, duplex=duplex,
-                       fit_to_page=fit, title=name)
+        return [submit(pdf, target, name, copies=copies, page_ranges=ranges,
+                       duplex=duplex, fit_to_page=fit)
                 for pdf, ranges, name in prepared]
 
     @app.post("/api/documents/<job_id>/print")

@@ -12,6 +12,16 @@
   let docs = [];  // { id, name, pages, el }
   let uploading = false;
 
+  // Two-sided only for printers that support it (e.g. not most home inkjets).
+  document.addEventListener("printerchange", (e) => {
+    const info = e.detail;
+    const two = document.querySelector('input[name="sides"][value="two"]');
+    const noDuplex = !!info && !info.duplex;
+    two.disabled = noDuplex;
+    document.getElementById("duplex-note").hidden = !noDuplex;
+    if (noDuplex && two.checked) document.querySelector('input[name="sides"][value="one"]').checked = true;
+  });
+
   /* ---------- choosing files ---------- */
 
   input.addEventListener("change", () => addFiles(input.files, input));
@@ -194,11 +204,12 @@
           documents: docs.map((d) => ({ id: d.id, pages: d.el.querySelector(".doc-range").value })),
           copies: document.getElementById("copies").value || 1,
           duplex: radioValue("sides") === "two",
+          ...printTarget(),
         }),
       });
       if (!res.ok) throw new Error(await readError(res));
       const { jobs } = await res.json();
-      toast(jobs.length > 1 ? `Sent ${jobs.length} documents to printer` : "Sent to printer", "success");
+      toast(sentMessage(jobs.length), "success");
       refreshStatus();
     } catch (err) {
       toast(err.message, "error");

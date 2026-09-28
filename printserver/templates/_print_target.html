@@ -1,0 +1,14 @@
+{#- Printer + colour choice, shared by every print page (filled in by common.js). -#}
+<div class="option">
+  <label class="option-label" for="printer-select">Printer</label>
+  <select id="printer-select" class="field select" aria-label="Printer">
+    <option value="">Loading&hellip;</option>
+  </select>
+</div>
+<div class="option" id="color-row" hidden>
+  <span class="option-label">Colour</span>
+  <div class="segmented" role="radiogroup" aria-label="Colour">
+    <label><input type="radio" name="color" value="color" checked><span>Colour</span></label>
+    <label><input type="radio" name="color" value="mono"><span>Black &amp; white</span></label>
+  </div>
+</div>

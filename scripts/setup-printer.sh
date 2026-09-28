@@ -1,62 +1,140 @@
 #!/usr/bin/env bash
-# Add the USB-connected Canon MF4820d (or another USB printer) to CUPS.
+# Add a printer to CUPS so the print server can use it. Run it once per printer.
 #
-# The MF4820d speaks Canon's UFR II LT language, so it needs Canon's
-# "UFR II / UFRII LT Printer Driver for Linux". Download the ARM64 .deb from
-# Canon's support site and pass it to this script, or install it yourself first:
+#   Canon MF4820d (USB, default printer):
+#     ./scripts/setup-printer.sh canon ~/cnrdrvcups-ufr2-uk_*_arm64.deb
+#     ./scripts/setup-printer.sh ~/cnrdrvcups-ufr2-uk_*_arm64.deb      (same thing)
 #
-#   ./scripts/setup-printer.sh ~/Downloads/cnrdrvcups-ufr2-uk_*_arm64.deb
+#   HP DeskJet 3835 (USB or Wi-Fi), uses the open-source HPLIP driver:
+#     ./scripts/setup-printer.sh hp
 #
-# Optional env vars: QUEUE_NAME (default Canon_MF4820d), PPD (force a PPD/model).
+#   Any other printer: set the variables below yourself, e.g.
+#     QUEUE_NAME=Brother_HL URI_MATCH=Brother MODEL_MATCH='HL-L2350' ./scripts/setup-printer.sh custom
+#
+# Optional env vars (override the preset):
+#   QUEUE_NAME   CUPS name for the printer (letters, digits, _ - .)
+#   URI_MATCH    regex picking the printer's connection from 'lpinfo -v'
+#   MODEL_MATCH  regex picking the driver from 'lpinfo -m'
+#   PPD          exact driver/model name to use (skips MODEL_MATCH)
+#   SET_DEFAULT  1 to make it the default printer
 set -euo pipefail
 
-QUEUE_NAME="${QUEUE_NAME:-Canon_MF4820d}"
+PRESET="canon"
+DRIVER_DEB=""
+for arg in "$@"; do
+  case "$arg" in
+    canon|hp|custom) PRESET="$arg" ;;
+    *.deb) DRIVER_DEB="$arg" ;;
+    *) echo "Unknown argument: $arg (use: canon [driver.deb] | hp | custom)" >&2; exit 1 ;;
+  esac
+done
 
-if [[ $# -ge 1 ]]; then
-  echo "==> Installing Canon driver package $1"
-  sudo apt-get install -y "$(realpath "$1")"
+case "$PRESET" in
+  canon)
+    : "${QUEUE_NAME:=Canon_MF4820d}"
+    : "${URI_MATCH:=usb://Canon}"
+    : "${MODEL_MATCH:=MF4800|MF4820}"
+    : "${SET_DEFAULT:=1}" ;;
+  hp)
+    : "${QUEUE_NAME:=HP_DeskJet_3835}"
+    : "${URI_MATCH:=HP|Hewlett|DeskJet}"
+    : "${MODEL_MATCH:=deskjet.?38(30|35)}"
+    : "${SET_DEFAULT:=0}" ;;
+  custom)
+    if [[ -z "${QUEUE_NAME:-}" || -z "${URI_MATCH:-}" || ( -z "${MODEL_MATCH:-}" && -z "${PPD:-}" ) ]]; then
+      echo "custom needs QUEUE_NAME, URI_MATCH and MODEL_MATCH (or PPD)." >&2
+      exit 1
+    fi
+    : "${SET_DEFAULT:=0}" ;;
+esac
+
+if ! [[ "$QUEUE_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "QUEUE_NAME may only contain letters, digits, _ - ." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+if [[ -n "$DRIVER_DEB" ]]; then
+  echo "==> Installing driver package $DRIVER_DEB"
+  sudo apt-get install -y "$(realpath "$DRIVER_DEB")"
   sudo systemctl restart cups
 fi
 
-echo "==> Looking for a USB printer"
-URI="$(sudo lpinfo -v 2>/dev/null | awk '/usb:\/\/Canon/ {print $2; exit}')"
-if [[ -z "$URI" ]]; then
-  URI="$(sudo lpinfo -v 2>/dev/null | awk '/usb:\/\// {print $2; exit}')"
+if [[ "$PRESET" == "hp" ]] && ! dpkg -s hplip >/dev/null 2>&1; then
+  echo "==> Installing the HP driver (HPLIP)"
+  sudo apt-get install -y --no-install-recommends hplip
+  sudo systemctl restart cups
 fi
+
+# ---------------------------------------------------------------------------
+# Connection (USB first, then network)
+# ---------------------------------------------------------------------------
+echo "==> Looking for the printer (this can take ~20 seconds)"
+DEVICES="$(sudo lpinfo -v 2>/dev/null | awk '{print $2}' | grep -iE "$URI_MATCH" || true)"
+URI=""
+for pattern in '^usb:' '^hp:/usb' '^(ipps?|dnssd):' '^hp:'; do
+  URI="$(grep -m1 -E "$pattern" <<<"$DEVICES" || true)"
+  [[ -n "$URI" ]] && break
+done
 if [[ -z "$URI" ]]; then
-  echo "No USB printer found. Check the cable, switch the printer on, then run 'sudo lpinfo -v'." >&2
+  cat >&2 <<EOF
+No printer matching '$URI_MATCH' was found.
+ - USB: check the cable and that the printer is switched on.
+ - Wi-Fi: the printer must be on the same network as the Pi.
+Then list what the Pi can see with:  sudo lpinfo -v
+EOF
   exit 1
 fi
 echo "    found $URI"
 
-echo "==> Looking for a driver (PPD)"
-MODEL="${PPD:-$(lpinfo -m 2>/dev/null | grep -iE 'MF4800|MF4820' | head -n1 | awk '{print $1}')}"
+# ---------------------------------------------------------------------------
+# Driver model (PPD)
+# ---------------------------------------------------------------------------
+echo "==> Looking for a driver"
+MODEL="${PPD:-$(lpinfo -m 2>/dev/null | grep -iE "$MODEL_MATCH" | grep -v -i 'hpijs' | head -n1 | awk '{print $1}')}"
+if [[ -z "$MODEL" && "$URI" =~ ^(ipps?|dnssd): ]]; then
+  # Network printers that support IPP Everywhere / AirPrint work without a driver.
+  MODEL="everywhere"
+fi
 if [[ -z "$MODEL" ]]; then
-  cat >&2 <<'EOF'
+  if [[ "$PRESET" == "canon" ]]; then
+    cat >&2 <<'EOF'
 No Canon MF4800-series driver is installed.
 
  1. On Canon's support site, search "MF4820d" -> Drivers -> Linux and download
     "UFR II/UFRII LT Printer Driver for Linux" (V5.x or newer includes ARM64 builds).
  2. Extract it and copy the *arm64.deb (e.g. cnrdrvcups-ufr2-uk_*_arm64.deb) to the Pi.
- 3. Re-run:  ./scripts/setup-printer.sh path/to/that.deb
+ 3. Re-run:  ./scripts/setup-printer.sh canon path/to/that.deb
 
 Check the Pi is on 64-bit Raspberry Pi OS with:  dpkg --print-architecture   (should print arm64)
 EOF
+  else
+    echo "No driver matching '$MODEL_MATCH'. See the options with:  lpinfo -m | grep -i <model>" >&2
+    echo "then re-run with PPD=<first column of that line>." >&2
+  fi
   exit 1
 fi
 echo "    using $MODEL"
 
-echo "==> Creating CUPS queue '$QUEUE_NAME'"
+# ---------------------------------------------------------------------------
+# Queue
+# ---------------------------------------------------------------------------
+echo "==> Creating CUPS printer '$QUEUE_NAME'"
 sudo lpadmin -p "$QUEUE_NAME" -E -v "$URI" -m "$MODEL" \
   -o media=A4 -o PageSize=A4 -o printer-is-shared=true
-sudo lpadmin -d "$QUEUE_NAME"
+if [[ "$SET_DEFAULT" == "1" ]]; then
+  sudo lpadmin -d "$QUEUE_NAME"
+fi
 sudo cupsenable "$QUEUE_NAME"
 sudo cupsaccept "$QUEUE_NAME"
 
-# Also share the printer on the LAN so Windows/Mac/phones can add it directly.
+# Also share the printers on the LAN so Windows/Mac/phones can add them directly.
 sudo cupsctl --share-printers
 
 echo "==> Done. Status:"
 lpstat -p "$QUEUE_NAME"
 echo
 echo "Test page:  lp -d $QUEUE_NAME /usr/share/cups/data/testprint"
+echo "It now appears in the Printer list on http://$(hostname).local"

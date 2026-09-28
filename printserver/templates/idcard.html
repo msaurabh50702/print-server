@@ -23,6 +23,7 @@
   <p class="hint id-size">Printed at real size: {{ card.w_mm }} &times; {{ card.h_mm|int }} mm</p>
 
   <div class="card options">
+    {% include "_print_target.html" %}
     <div class="option">
       <span class="option-label">Cutting guide</span>
       <div class="segmented" role="radiogroup" aria-label="Cutting guide">

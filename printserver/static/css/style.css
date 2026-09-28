@@ -539,3 +539,49 @@ button { cursor: pointer; }
 .link-btn .icon { width: 18px; height: 18px; }
 .doc-preview { margin-top: 12px; }
 .doc-preview .pages { grid-template-columns: repeat(auto-fill, minmax(min(30%, 120px), 1fr)); gap: 10px; }
+
+/* ==========================================================================
+   Printer picker
+   ========================================================================== */
+.select {
+  flex: 1 1 180px; max-width: 100%; min-height: 44px; padding-right: 36px; cursor: pointer;
+  appearance: none; -webkit-appearance: none; text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 18px;
+}
+.select:disabled { cursor: default; opacity: .7; }
+.option-note { flex-basis: 100%; }
+.segmented label:has(input:disabled) span { opacity: .4; cursor: not-allowed; }
+a.status { text-decoration: none; }
+a.status:hover { border-color: var(--accent); }
+
+/* ==========================================================================
+   Print queue
+   ========================================================================== */
+.home-links { display: flex; justify-content: center; margin-top: 20px; }
+.queue-title { margin: 20px 0 12px; font-size: 1.1rem; }
+.job-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.job { display: flex; align-items: center; gap: 12px; padding: 12px 14px; animation: fade .25s var(--ease); }
+.job-icon {
+  display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 12px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.job-icon .icon { width: 20px; height: 20px; }
+.job-info { flex: 1; min-width: 0; display: grid; }
+.job-title, .job-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { font-size: .82rem; }
+.badge {
+  flex: none; padding: 4px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700;
+  background: var(--surface-2); color: var(--muted);
+}
+.badge.printing { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); animation: pulse-bg 1.6s ease-in-out infinite; }
+.badge.waiting { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.badge.cancelled { color: var(--danger); }
+@keyframes pulse-bg { 50% { opacity: .55; } }
+.job-cancel { flex: none; }
+.empty-state { display: flex; align-items: center; gap: 14px; padding: 18px; }
+.empty-state div { display: grid; }
+.empty-icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
+  background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok);
+}

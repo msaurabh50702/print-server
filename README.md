@@ -18,6 +18,11 @@ are needed on the phone or laptop.
   at once (up to 20). Reorder or remove them, preview the pages, and optionally set a page range
   for each document. Then print them all with shared copies and one- or two-sided settings.
   Each document is sent as its own print job, in list order.
+- **Several printers**: every print page has a printer picker (for example the Canon laser and an
+  HP DeskJet inkjet). It remembers your choice per phone and only shows options the printer supports:
+  **Colour / Black & white** for colour printers and **Two-sided** for printers with automatic duplex.
+- **Print queue**: tap the status pill to see what's printing or waiting on each printer, cancel jobs,
+  and see recently sent jobs.
 - Mobile-first web UI with a sticky bottom action bar, a touch crop editor,
   dark mode and "add to home screen" support.
 - The Pi also shares the printer over CUPS/IPP, so computers can add it as a normal
@@ -69,7 +74,25 @@ lp /usr/share/cups/data/testprint
 ```
 
 If the model isn't detected automatically, list the drivers with `lpinfo -m | grep -i canon`
-and run the script again with `PPD=<name> ./scripts/setup-printer.sh`.
+and run the script again with `PPD=<name> ./scripts/setup-printer.sh canon`.
+
+### Add more printers (e.g. HP DeskJet 3835)
+
+Connect the HP by USB, or put it on the same Wi-Fi as the Pi, and run:
+
+```bash
+./scripts/setup-printer.sh hp
+```
+
+This installs HP's open-source driver (HPLIP) and adds a queue called `HP_DeskJet_3835`. It prefers
+USB when both USB and Wi-Fi are available, and keeps the Canon as the default printer. For any other
+printer, pass your own names and patterns:
+
+```bash
+QUEUE_NAME=Brother_HL URI_MATCH=Brother MODEL_MATCH='HL-L2350' ./scripts/setup-printer.sh custom
+```
+
+Every printer set up in CUPS appears in the web app's printer list. Nothing else needs configuring.
 
 ## Use it
 

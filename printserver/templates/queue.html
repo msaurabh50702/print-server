@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Print queue{% endblock %}
+{% block heading %}Print queue{% endblock %}
+{% block content %}
+<section class="fade-in">
+  <h2 class="section-title queue-title">Printing &amp; waiting</h2>
+  <ul id="active-list" class="job-list" aria-live="polite"></ul>
+  <div id="active-empty" class="card empty-state" hidden>
+    <span class="empty-icon">{{ icon("check") }}</span>
+    <div>
+      <strong>Nothing in the queue</strong>
+      <span class="hint">New print jobs will show up here.</span>
+    </div>
+  </div>
+
+  <h2 class="section-title queue-title">Recent</h2>
+  <ul id="recent-list" class="job-list"></ul>
+  <p id="recent-empty" class="hint" hidden>No jobs sent from this app yet.</p>
+</section>
+
+<template id="job-item">
+  <li class="job card">
+    <span class="job-icon">{{ icon("print") }}</span>
+    <div class="job-info">
+      <strong class="job-title"></strong>
+      <span class="hint job-meta"></span>
+    </div>
+    <span class="badge"></span>
+    <button class="icon-btn danger job-cancel" type="button" aria-label="Cancel job" hidden>{{ icon("x") }}</button>
+  </li>
+</template>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/queue.js') }}"></script>
+{% endblock %}

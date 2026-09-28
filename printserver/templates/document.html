@@ -30,6 +30,7 @@
   <ol id="doc-list" class="doc-list" aria-label="Documents to print"></ol>
 
   <div class="card options">
+    {% include "_print_target.html" %}
     <div class="option">
       <span class="option-label">Copies <small class="hint">(each document)</small></span>
       <div class="stepper">
@@ -44,6 +45,7 @@
         <label><input type="radio" name="sides" value="one" checked><span>One-sided</span></label>
         <label><input type="radio" name="sides" value="two"><span>Two-sided</span></label>
       </div>
+      <small id="duplex-note" class="hint option-note" hidden>This printer can only print on one side automatically.</small>
     </div>
   </div>
 

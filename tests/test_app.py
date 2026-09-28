@@ -1,6 +1,7 @@
 import glob
 import io
 import shutil
+import subprocess
 
 import pytest
 from PIL import Image
@@ -261,3 +262,180 @@ def test_batch_print_rejects_bad_input(client):
     assert traversal.status_code == 400
     too_many = client.post("/api/documents/print", json={"documents": [{"id": "0" * 32}] * 21})
     assert too_many.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Multiple printers, colour and queue
+# ---------------------------------------------------------------------------
+from printserver import printing  # noqa: E402
+
+LPSTAT = """printer Canon_MF4820d is idle.  enabled since Mon 28 Sep 2026
+\tForm mounted:
+\tDescription: Canon MF4820d
+printer HP_DeskJet_3835 now printing HP_DeskJet_3835-7.  enabled since Mon 28 Sep 2026
+\tDescription: HP DeskJet 3835
+printer Old_Printer disabled since Sun 27 Sep 2026 -
+\tPaused
+"""
+
+HP_OPTIONS = """PageSize/Media Size: Letter *A4 Legal
+ColorModel/Output Mode: *RGB CMYGray KGray
+OutputMode/Print Quality: Draft *Normal Best
+"""
+
+CANON_OPTIONS = """PageSize/Page Size: *A4 Letter
+Duplex/Duplex Printing: *None DuplexNoTumble DuplexTumble
+CNTonerSaving/Toner Save: *False True
+"""
+
+LPQ = """HP_DeskJet_3835 is ready and printing
+Rank    Owner   Job     File(s)                         Total Size
+active  pi      7       Passport photos                 812345 bytes
+1st     pi      8       invoice (final).pdf             45000 bytes
+"""
+
+
+def test_parse_lpstat_printers():
+    printers = printing.parse_lpstat_printers(LPSTAT)
+    assert [p["name"] for p in printers] == ["Canon_MF4820d", "HP_DeskJet_3835", "Old_Printer"]
+    assert printers[0]["description"] == "Canon MF4820d" and printers[0]["state"] == "idle"
+    assert printers[1]["state"] == "printing" and printers[1]["ok"]
+    assert printers[2]["state"] == "disabled" and not printers[2]["ok"]
+
+
+def test_parse_lpoptions_colour_and_duplex():
+    hp = printing.parse_lpoptions(HP_OPTIONS)
+    assert hp == {"duplex": False, "color": True, "mono_option": ("ColorModel", "KGray")}
+    canon = printing.parse_lpoptions(CANON_OPTIONS)
+    assert canon == {"duplex": True, "color": False, "mono_option": None}
+
+
+def test_parse_lpq():
+    jobs = printing.parse_lpq(LPQ, "HP_DeskJet_3835")
+    assert [j["id"] for j in jobs] == ["HP_DeskJet_3835-7", "HP_DeskJet_3835-8"]
+    assert jobs[0]["state"] == "printing" and jobs[0]["title"] == "Passport photos"
+    assert jobs[1]["state"] == "waiting" and jobs[1]["title"] == "invoice (final).pdf"
+
+
+def test_build_lp_args_black_and_white():
+    args = printing.build_lp_args("/x.pdf", "HP_DeskJet_3835", copies=2, mono=True,
+                                  mono_option=("ColorModel", "KGray"), title="Doc")
+    assert args[:3] == ["lp", "-d", "HP_DeskJet_3835"]
+    assert "print-color-mode=monochrome" in args and "ColorModel=KGray" in args
+    assert "collate=true" in args and args[-1] == "/x.pdf"
+
+
+class FakeCups:
+    """Stands in for the CUPS command line tools."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, args, timeout=20):
+        self.calls.append(args)
+        out, code = "", 0
+        if args[:2] == ["lpstat", "-l"]:
+            out = LPSTAT
+        elif args[:2] == ["lpstat", "-d"]:
+            out = "system default destination: Canon_MF4820d"
+        elif args[0] == "lpoptions":
+            out = HP_OPTIONS if args[2] == "HP_DeskJet_3835" else CANON_OPTIONS
+        elif args[0] == "lpq":
+            out = LPQ if args[2] == "HP_DeskJet_3835" else "no entries"
+        elif args[0] == "lp":
+            out = f"request id is {args[2]}-9 (1 file(s))"
+        return subprocess.CompletedProcess(args, code, out, "")
+
+
+@pytest.fixture
+def cups(monkeypatch):
+    fake = FakeCups()
+    monkeypatch.setattr(printing, "_run", fake)
+    return fake
+
+
+@pytest.fixture
+def live_client(tmp_path, cups):
+    """App that talks to the fake CUPS instead of dry-run mode."""
+    return create_app({"DATA_DIR": tmp_path, "DRY_RUN": False, "TESTING": True}).test_client()
+
+
+def test_printers_api_lists_capabilities(live_client):
+    data = live_client.get("/api/printers").get_json()
+    assert data["default"] == "Canon_MF4820d"
+    by_name = {p["name"]: p for p in data["printers"]}
+    assert by_name["HP_DeskJet_3835"]["color"] and not by_name["HP_DeskJet_3835"]["duplex"]
+    assert by_name["Canon_MF4820d"]["duplex"] and not by_name["Canon_MF4820d"]["color"]
+    assert by_name["Canon_MF4820d"]["is_default"]
+
+
+def test_print_goes_to_chosen_printer_in_black_and_white(live_client, cups):
+    resp = live_client.post("/api/photos/print", data={
+        "layout": "1", "cell0": (jpeg(), "a.jpg"), "printer": "HP_DeskJet_3835", "color": "mono",
+    }, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["job"] == "HP_DeskJet_3835-9"
+    lp = next(c for c in cups.calls if c[0] == "lp")
+    assert lp[2] == "HP_DeskJet_3835" and "ColorModel=KGray" in lp
+
+
+def test_duplex_dropped_and_mono_ignored_where_unsupported(live_client, cups):
+    doc = upload_image_doc(live_client)
+    resp = live_client.post("/api/documents/print", json={
+        "documents": [{"id": doc}], "printer": "HP_DeskJet_3835", "duplex": True})
+    assert resp.status_code == 200
+    lp = next(c for c in cups.calls if c[0] == "lp")
+    assert "sides=one-sided" in lp  # the DeskJet can't print two-sided
+    cups.calls.clear()
+    live_client.post("/api/documents/print", json={
+        "documents": [{"id": doc}], "printer": "Canon_MF4820d", "duplex": True, "color": "mono"})
+    lp = next(c for c in cups.calls if c[0] == "lp")
+    assert "sides=two-sided-long-edge" in lp and "print-color-mode=monochrome" not in lp
+
+
+def test_default_printer_used_when_none_chosen(live_client, cups):
+    live_client.post("/api/id-card/print", data={"front": (jpeg(), "f.jpg")},
+                     content_type="multipart/form-data")
+    assert next(c for c in cups.calls if c[0] == "lp")[2] == "Canon_MF4820d"
+
+
+def test_unknown_printer_rejected_before_printing(live_client, cups):
+    for bad in ("Nope", "-o evil", "../x"):
+        resp = live_client.post("/api/passport/print", data={
+            "photo": (jpeg(), "p.jpg"), "size": "35x45", "printer": bad,
+        }, content_type="multipart/form-data")
+        assert resp.status_code == 400
+    assert not any(c[0] == "lp" for c in cups.calls)
+
+
+def test_queue_shows_active_and_recent(live_client, cups):
+    live_client.post("/api/photos/print", data={"layout": "1", "cell0": (jpeg(), "a.jpg")},
+                     content_type="multipart/form-data")
+    data = live_client.get("/api/queue").get_json()
+    assert {j["id"] for j in data["active"]} == {"HP_DeskJet_3835-7", "HP_DeskJet_3835-8"}
+    # The photo job went to the Canon, which has an empty queue, so it's done.
+    assert data["recent"][0]["title"] == "Photos" and data["recent"][0]["state"] == "done"
+
+
+def test_cancel_only_active_jobs(live_client, cups):
+    assert live_client.post("/api/queue/HP_DeskJet_3835-7/cancel").status_code == 200
+    assert ["cancel", "HP_DeskJet_3835-7"] in cups.calls
+    for bad in ("HP_DeskJet_3835-99", "x;rm -rf", "-a"):
+        assert live_client.post(f"/api/queue/{bad}/cancel").status_code in (400, 404)
+
+
+def test_status_for_chosen_printer(live_client):
+    data = live_client.get("/api/status?printer=HP_DeskJet_3835").get_json()
+    assert data["printer"] == "HP_DeskJet_3835" and data["queued_jobs"] == 2
+    assert data["printers"] == 3
+
+
+def test_dry_run_printers_and_queue(client):
+    names = [p["name"] for p in client.get("/api/printers").get_json()["printers"]]
+    assert names == ["Test_Mono_Laser", "Test_Colour_Inkjet"]
+    client.post("/api/photos/print", data={"layout": "1", "cell0": (jpeg(), "a.jpg"),
+                                           "printer": "Test_Colour_Inkjet"},
+                content_type="multipart/form-data")
+    recent = client.get("/api/queue").get_json()["recent"]
+    assert recent[0]["printer"] == "Test_Colour_Inkjet"
+    assert client.get("/queue").status_code == 200
