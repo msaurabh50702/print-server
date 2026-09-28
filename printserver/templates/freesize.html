@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Free size{% endblock %}
+{% block heading %}Free size{% endblock %}
+{% block content %}
+<section class="fade-in">
+  <div class="grid-head">
+    <p class="hint" id="fs-hint">Add a photo, then drag it on the page. Pull the corner to resize.</p>
+    <button id="fs-add" class="chip" type="button">{{ icon("plus") }}<span>Add photo</span></button>
+  </div>
+
+  <div class="page-wrap">
+    <div id="fs-page" class="fs-page" aria-label="A4 page">
+      <div class="fs-margin" aria-hidden="true"></div>
+      <i class="fs-guide v" hidden></i><i class="fs-guide h" hidden></i>
+      <button id="fs-empty" class="fs-empty" type="button">
+        <span class="plus" aria-hidden="true">+</span><span>Add photo</span>
+      </button>
+    </div>
+  </div>
+  <p id="fs-warning" class="hint fs-warning" hidden>Parts outside the dashed line may be cut off by the printer.</p>
+
+  <div id="fs-tools" class="card fs-tools" hidden>
+    <div class="fs-size">
+      <label>Width <span class="fs-num"><input id="fs-w" type="number" inputmode="decimal" step="0.1" min="0.5" max="59"><em>cm</em></span></label>
+      <span class="fs-times">×</span>
+      <label>Height <span class="fs-num"><input id="fs-h" type="number" inputmode="decimal" step="0.1" min="0.5" max="59"><em>cm</em></span></label>
+    </div>
+    <div class="fs-actions" role="toolbar" aria-label="Photo tools">
+      <button class="tool-btn" type="button" data-act="edit">{{ icon("edit") }}<span>Crop</span></button>
+      <button class="tool-btn" type="button" data-act="center">{{ icon("center") }}<span>Centre</span></button>
+      <button class="tool-btn" type="button" data-act="fit">{{ icon("expand") }}<span>Fit page</span></button>
+      <button class="tool-btn" type="button" data-act="duplicate">{{ icon("copy-all") }}<span>Duplicate</span></button>
+      <button class="tool-btn danger" type="button" data-act="delete">{{ icon("trash") }}<span>Delete</span></button>
+    </div>
+  </div>
+
+  <div class="card options">
+    {% include "_print_target.html" %}
+    <div class="option">
+      <span class="option-label">Copies</span>
+      <div class="stepper">
+        <button type="button" data-step="-1" aria-label="Fewer copies">&minus;</button>
+        <input id="copies" type="number" min="1" max="99" value="1" inputmode="numeric" aria-label="Copies">
+        <button type="button" data-step="1" aria-label="More copies">+</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <button id="download-pdf" class="btn ghost" type="button" aria-label="Download PDF">{{ icon("download") }}<span class="hide-sm">PDF</span></button>
+    <button id="print-free" class="btn primary grow" type="button">{{ icon("print") }}<span>Print</span></button>
+  </div>
+</section>
+
+<input id="file-input" type="file" accept="image/*,.heic,.heif" hidden>
+{% include "_editor.html" %}
+{% endblock %}
+{% block scripts %}
+<script>window.SHEET = {{ sheet|tojson }};</script>
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/freesize.js') }}"></script>
+{% endblock %}

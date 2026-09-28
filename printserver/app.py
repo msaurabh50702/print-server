@@ -16,6 +16,8 @@ from .history import JobHistory
 from .config import Config
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+for _type, _ext in (("image/heic", ".heic"), ("image/heif", ".heif"), ("image/webp", ".webp")):
+    mimetypes.add_type(_type, _ext)
 MAX_BATCH = 20
 
 
@@ -68,8 +70,10 @@ def create_app(config=None):
             default = None
         default_info = next((p for p in state["printers"] if p["name"] == default), None)
         label, ok = printing.status_label(default_info, dry_run)
+        warn = ok and bool(default_info and default_info.get("alerts")) and not default_info["queued"]
         return {"printers": state["printers"], "default": default, "dry_run": dry_run,
-                "status": {"text": label, "ok": ok}}
+                "status": {"text": label, "ok": ok,
+                           "state": "warn" if warn and not dry_run else ("ok" if ok else "bad")}}
 
     def queue_data():
         dry_run = app.config["DRY_RUN"]
@@ -90,19 +94,25 @@ def create_app(config=None):
         return {"boot": overview()}
 
     def print_target(options):
-        """(printer, colour mode) chosen in the UI, validated against CUPS."""
+        """Printer, colour, paper and quality chosen in the UI, validated against CUPS.
+
+        Paper/quality values are checked against the printer's own choices
+        when the job is sent (printing.driver_options).
+        """
         printer = printing.resolve_printer(
             str(options.get("printer") or "").strip(), app.config["PRINTER_NAME"],
             app.config["DRY_RUN"])
-        color = "mono" if options.get("color") == "mono" else "color"
-        return printer, color
+        return {"printer": printer,
+                "color": "mono" if options.get("color") == "mono" else "color",
+                "paper": str(options.get("paper") or "")[:100] or None,
+                "quality": str(options.get("quality") or "")[:100] or None}
 
     def submit(pdf_path, target, title, copies=1, **kwargs):
-        printer, color = target
         job = printing.submit(
-            pdf_path, printer, app.config["DRY_RUN"], app.config["DRY_RUN_DIR"],
-            copies=copies, title=title, color=color, **kwargs)
-        history.add(job, printer, title, copies)
+            pdf_path, target["printer"], app.config["DRY_RUN"], app.config["DRY_RUN_DIR"],
+            copies=copies, title=title, color=target["color"], paper=target["paper"],
+            quality=target["quality"], **kwargs)
+        history.add(job, target["printer"], title, copies)
         return job
 
     def int_arg(value, default, low, high):
@@ -185,6 +195,12 @@ def create_app(config=None):
     @app.get("/queue")
     def queue_page():
         return render_template("queue.html", initial_queue=queue_data())
+
+    @app.get("/free-size")
+    def free_size_page():
+        sheet = {"page_w_mm": photos.A4_MM[0], "page_h_mm": photos.A4_MM[1],
+                 "margin_mm": app.config["PAGE_MARGIN_MM"], "max_items": photos.FREE_MAX_ITEMS}
+        return render_template("freesize.html", sheet=sheet)
 
     @app.get("/document")
     def document_page():
@@ -337,6 +353,52 @@ def create_app(config=None):
         (path / "name.txt").write_text(display_name)
         return {"id": job_id, "name": display_name, "pages": documents.page_count(pdf),
                 "image": ext in documents.IMAGE_EXTS}
+
+    def compose_free_request():
+        try:
+            layout = json.loads(request.form.get("items") or "[]")
+            if not isinstance(layout, list):
+                raise ValueError
+            items = []
+            for i, item in enumerate(layout[:photos.FREE_MAX_ITEMS + 1]):
+                file = request.files.get(f"item{i}")
+                if not file:
+                    raise ValueError
+                items.append((file.stream, item["x"], item["y"], item["w"], item["h"]))
+        except (ValueError, TypeError, KeyError):
+            raise printing.PrintError("Invalid page layout")
+        try:
+            page = photos.compose_free(items, app.config["PHOTO_DPI"])
+        except (ValueError, OSError) as exc:
+            raise printing.PrintError(str(exc))
+        _, path = new_job_dir()
+        pdf_path = path / "document.pdf"
+        photos.save_pdf(page, pdf_path, app.config["PHOTO_DPI"])
+        return pdf_path
+
+    @app.post("/api/free-size/pdf")
+    def free_size_pdf():
+        return send_file(compose_free_request(), mimetype="application/pdf",
+                         as_attachment=True, download_name="free-size.pdf")
+
+    @app.post("/api/free-size/print")
+    def free_size_print():
+        target = print_target(request.form)
+        pdf_path = compose_free_request()
+        copies = int_arg(request.form.get("copies"), 1, 1, 99)
+        return jsonify(job=submit(pdf_path, target, "Free size photos", copies=copies))
+
+    @app.post("/api/images/jpeg")
+    def image_to_jpeg():
+        """Convert a photo the phone's browser can't show (e.g. HEIC) to JPEG."""
+        file = request.files.get("file")
+        if not file:
+            raise printing.PrintError("No image")
+        try:
+            data = documents.to_jpeg(file.stream)
+        except Exception:
+            raise documents.ConversionError("This image format isn't supported")
+        return app.response_class(data, mimetype="image/jpeg")
 
     @app.post("/api/documents")
     def upload_document():

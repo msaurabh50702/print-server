@@ -26,6 +26,12 @@
         <span>Arrange {{ "the photo" if images|length == 1 else "the photos" }} on one A4 page, then crop and rotate.</span></span>
       <span class="chev">{{ icon("back") }}</span>
     </a>
+    <a class="choice" href="{{ url_for('free_size_page', share=share_id) }}">
+      <span class="choice-icon free">{{ icon("resize") }}</span>
+      <span class="choice-text"><strong>Free size</strong>
+        <span>Place {{ "it" if images|length == 1 else "them" }} on a blank A4 page and set any size.</span></span>
+      <span class="chev">{{ icon("back") }}</span>
+    </a>
     {% if images|length == 1 %}
     <a class="choice" href="{{ url_for('passport_page', share=share_id) }}">
       <span class="choice-icon passport">{{ icon("person") }}</span>
@@ -38,7 +44,7 @@
     <a class="choice" href="{{ url_for('id_card_page', share=share_id) }}">
       <span class="choice-icon idcard">{{ icon("id-card") }}</span>
       <span class="choice-text"><strong>ID card copy</strong>
-        <span>{{ "Front of the card" if images|length == 1 else "First photo is the front, second the back" }}, at real size.</span></span>
+        <span>{{ "Front of the card" if images|length == 1 else "First photo is the front, second the back" }} on one page.</span></span>
       <span class="chev">{{ icon("back") }}</span>
     </a>
     {% endif %}

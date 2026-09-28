@@ -47,6 +47,16 @@
       ]
     },
     {
+      "name": "Free size",
+      "url": "/free-size",
+      "icons": [
+        {
+          "src": "/static/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
       "name": "Print photos",
       "url": "/photos",
       "icons": [

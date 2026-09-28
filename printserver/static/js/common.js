@@ -59,20 +59,47 @@ function selectedPrinter() {
 const selectedPrinterInfo = () => printersInfo.find((p) => p.name === selectedPrinter());
 const printerLabel = (p) => (p ? p.description || p.name.replace(/_/g, " ") : "");
 
-// Printer + colour chosen on this page, sent with every print request.
+// Value of a paper/quality menu if it's shown for the current printer.
+function choiceValue(kind) {
+  const row = document.getElementById(`${kind}-row`);
+  const select = document.getElementById(`${kind}-select`);
+  return row && !row.hidden && select ? select.value : "";
+}
+
+// Printer, colour, paper and quality chosen on this page, sent with every print.
 function printTarget() {
   const info = selectedPrinterInfo();
   const mono = document.querySelector('input[name="color"][value="mono"]');
   return {
     printer: selectedPrinter(),
     color: info && info.color && mono && mono.checked ? "mono" : "color",
+    paper: choiceValue("paper"),
+    quality: choiceValue("quality"),
   };
 }
 
 function appendPrintTarget(form) {
-  const target = printTarget();
-  form.append("printer", target.printer);
-  form.append("color", target.color);
+  for (const [key, value] of Object.entries(printTarget())) form.append(key, value);
+}
+
+// Paper type / print quality menus, remembered per printer on this phone.
+const choiceKey = (kind, printer) => `${kind}:${printer}`;
+
+function fillChoice(kind, info) {
+  const row = document.getElementById(`${kind}-row`);
+  const select = document.getElementById(`${kind}-select`);
+  if (!row || !select) return;
+  const set = info && info[kind];
+  row.hidden = !set;
+  if (!set) return;
+  const signature = info.name + JSON.stringify(set.choices);
+  if (select.dataset.signature === signature) return;
+  select.dataset.signature = signature;
+  select.replaceChildren(...set.choices.map((c) => new Option(c.label, c.value)));
+  let saved = "";
+  try { saved = localStorage.getItem(choiceKey(kind, info.name)) || ""; } catch (_) { /* private mode */ }
+  const values = set.choices.map((c) => c.value);
+  select.value = values.includes(saved) ? saved : (values.includes(set.default) ? set.default : values[0]);
 }
 
 // Show only the options the chosen printer supports; pages can listen for
@@ -81,15 +108,22 @@ function applyPrinterCaps() {
   const info = selectedPrinterInfo();
   const colorRow = document.getElementById("color-row");
   if (colorRow) colorRow.hidden = !(info && info.color);
+  fillChoice("paper", info);
+  fillChoice("quality", info);
   document.dispatchEvent(new CustomEvent("printerchange", { detail: info || null }));
 }
+
+// First alert of a printer ("Out of paper", "Black ink low"...), if any.
+const printerAlert = (p) => (p && p.alerts && p.alerts[0]) || null;
 
 function renderPrinterSelect(defaultName) {
   const select = document.getElementById("printer-select");
   if (!select) return;
   const options = printersInfo.map((p) => {
     let label = printerLabel(p);
+    const alert = printerAlert(p);
     if (p.state === "disabled") label += " (offline)";
+    else if (alert && alert.severity === "error") label += ` (${alert.text.toLowerCase()})`;
     else if (p.is_default && printersInfo.length > 1) label += " · default";
     return [p.name, label];
   });
@@ -110,14 +144,17 @@ function renderPrinterSelect(defaultName) {
 function renderStatus() {
   const el = document.getElementById("printer-status");
   const info = selectedPrinterInfo();
-  let text, ok;
-  if (!info) [text, ok] = ["No printer", false];
-  else if (overviewData.dry_run) [text, ok] = ["Test mode", true];
-  else if (!info.ok) [text, ok] = ["Offline", false];
-  else [text, ok] = [info.queued ? `Printing (${info.queued})` : "Ready", true];
+  const alert = printerAlert(info);
+  let text, state;
+  if (!info) [text, state] = ["No printer", "bad"];
+  else if (overviewData.dry_run) [text, state] = ["Test mode", "ok"];
+  else if (!info.ok) [text, state] = ["Offline", "bad"];
+  else if (alert && alert.severity === "error") [text, state] = [alert.text, "bad"];
+  else if (info.queued) [text, state] = [`Printing (${info.queued})`, "ok"];
+  else if (alert) [text, state] = [alert.text, "warn"];
+  else [text, state] = ["Ready", "ok"];
   el.querySelector(".status-text").textContent = text;
-  el.classList.toggle("ok", ok);
-  el.classList.toggle("bad", !ok);
+  for (const cls of ["ok", "bad", "warn"]) el.classList.toggle(cls, cls === state);
   el.title = `${info ? printerLabel(info) : "No printer"} · Tap to see the print queue`;
 }
 
@@ -128,6 +165,7 @@ function applyOverview(data) {
   const changed = renderPrinterSelect(data.default);
   if (changed !== false) applyPrinterCaps();
   renderStatus();
+  document.dispatchEvent(new CustomEvent("overview", { detail: data }));
 }
 
 let refreshing = null;
@@ -147,6 +185,11 @@ function refreshStatus() {
 }
 
 document.addEventListener("change", (e) => {
+  if (e.target.id === "paper-select" || e.target.id === "quality-select") {
+    const kind = e.target.id.split("-")[0];
+    try { localStorage.setItem(choiceKey(kind, selectedPrinter()), e.target.value); } catch (_) { /* private mode */ }
+    return;
+  }
   if (e.target.id !== "printer-select") return;
   try { localStorage.setItem(PRINTER_KEY, e.target.value); } catch (_) { /* private mode */ }
   applyPrinterCaps();

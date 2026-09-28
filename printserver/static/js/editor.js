@@ -22,9 +22,33 @@ function loadImage(file) {
   });
 }
 
+// Photos the browser can't show itself (e.g. HEIC on Android) are converted
+// to JPEG by the server once, then reused for every later edit.
+const convertedPhotos = new WeakMap();
+
+async function serverJpeg(file) {
+  if (convertedPhotos.has(file)) return convertedPhotos.get(file);
+  const form = new FormData();
+  form.append("file", file, file.name || "photo");
+  const res = await fetch("/api/images/jpeg", { method: "POST", body: form });
+  if (!res.ok) throw new Error("This photo format isn't supported");
+  const blob = await res.blob();
+  convertedPhotos.set(file, blob);
+  return blob;
+}
+
+async function loadAnyImage(file) {
+  if (convertedPhotos.has(file)) return loadImage(convertedPhotos.get(file));
+  try {
+    return await loadImage(file);
+  } catch (_) {
+    return loadImage(await serverJpeg(file));
+  }
+}
+
 // Draw the (EXIF-oriented) image into a canvas, downscaled if huge.
 async function workingCanvas(file) {
-  const img = await loadImage(file);
+  const img = await loadAnyImage(file);
   const scale = Math.min(1, MAX_WORKING_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
   const c = document.createElement("canvas");
   c.width = Math.round(img.naturalWidth * scale);
@@ -109,7 +133,7 @@ class PhotoEditor {
     });
   }
 
-  /* opts: { file, state, aspect, isNew, faceGuide?, onDone(result), onAll(result)?, onRemove(), onReplace(), onCancel() }
+  /* opts: { file, state, aspect, isNew, faceGuide?, noLock?, onDone(result), onAll(result)?, onRemove(), onReplace(), onCancel() }
      "Fill all" is only shown when onAll is given. */
   async open(opts) {
     this.opts = opts;
@@ -122,6 +146,7 @@ class PhotoEditor {
     document.getElementById("ed-remove").hidden = !!opts.isNew;
     document.getElementById("ed-replace").hidden = !!opts.isNew;
     document.getElementById("ed-all").hidden = !opts.onAll;
+    this.lockBtn.hidden = !!opts.noLock;  // free crop: no fixed shape to lock to
     document.getElementById("ed-hint").textContent = opts.faceGuide
       ? "Fit the face inside the oval. Drag a corner to zoom."
       : "Drag the box to move it. Drag a corner to resize.";

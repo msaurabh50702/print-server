@@ -73,12 +73,12 @@ def save_pdf(page, path, dpi=300):
     page.save(path, "PDF", resolution=dpi)
 
 
-# ISO/IEC 7810 ID-1: bank cards, driving licences, most national ID cards.
-ID_CARD_MM = (85.6, 54.0)
+# Printed size of each side of an ID card copy (a real ID-1 card is 85.6 x 54 mm).
+ID_CARD_MM = (125.6, 94.0)
 
 
 def compose_id_card(front, back=None, dpi=300, outline=True):
-    """Place an ID card's front and back at real size on an A4 page.
+    """Place an ID card's front and back at ID_CARD_MM size on an A4 page.
 
     front/back: file-like or path, already cropped to the card. The front is
     centred in the top half of the page and the back in the bottom half, like
@@ -159,3 +159,33 @@ def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline
             draw.rectangle([x - pad, y - pad, x + photo_w + pad - 1, y + photo_h + pad - 1],
                            outline=(170, 170, 170), width=pad)
     return page, total
+
+
+FREE_MAX_ITEMS = 20
+
+
+def compose_free(items, dpi=300):
+    """Place photos anywhere on an A4 page at the exact size given.
+
+    items: [(source, x_mm, y_mm, w_mm, h_mm)], measured from the top-left
+    corner of the page. Parts outside the page are cut off.
+    """
+    if not items:
+        raise ValueError("Add a photo first")
+    if len(items) > FREE_MAX_ITEMS:
+        raise ValueError(f"At most {FREE_MAX_ITEMS} photos per page")
+    page = Image.new("RGB", (_mm_to_px(A4_MM[0], dpi), _mm_to_px(A4_MM[1], dpi)), "white")
+    for source, x, y, w, h in items:
+        values = [float(v) for v in (x, y, w, h)]
+        if not all(abs(v) < 10_000 for v in values):   # also rejects NaN / infinity
+            raise ValueError("Invalid photo position")
+        x, y, w, h = values
+        if not (1 <= w <= 2 * A4_MM[1] and 1 <= h <= 2 * A4_MM[1]):
+            raise ValueError("Photo size must be between 1 mm and 594 mm")
+        if x >= A4_MM[0] or y >= A4_MM[1] or x + w <= 0 or y + h <= 0:
+            continue  # completely off the page
+        with Image.open(source) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            img = img.resize((max(1, _mm_to_px(w, dpi)), max(1, _mm_to_px(h, dpi))), Image.LANCZOS)
+        page.paste(img, (_mm_to_px(x, dpi), _mm_to_px(y, dpi)))
+    return page

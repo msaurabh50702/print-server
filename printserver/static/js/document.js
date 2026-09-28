@@ -210,6 +210,7 @@
           documents: docs.map((d) => ({ id: d.id, pages: d.el.querySelector(".doc-range").value })),
           copies: document.getElementById("copies").value || 1,
           duplex: radioValue("sides") === "two",
+          fit_to_page: radioValue("scale") === "fit",
           ...printTarget(),
         }),
       });

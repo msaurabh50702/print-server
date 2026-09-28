@@ -86,6 +86,70 @@
     }
   }
 
+  /* ---------- printers: ink / toner levels and alerts ---------- */
+
+  const panel = document.getElementById("printer-panel");
+  let panelSignature = "";
+
+  function supplyBar(supply) {
+    const row = document.createElement("div");
+    row.className = "supply";
+    const known = supply.level !== null && supply.level !== undefined;
+    const fill = supply.color === "multi"
+      ? "linear-gradient(90deg, #00bcd4, #e91e63, #ffc107)"
+      : supply.color;
+    row.innerHTML = `
+      <span class="supply-name"></span>
+      <span class="supply-bar${supply.low ? " low" : ""}"><i></i></span>
+      <span class="supply-level"></span>`;
+    row.querySelector(".supply-name").textContent = supply.name;
+    row.querySelector(".supply-bar i").style.cssText = `width:${known ? supply.level : 0}%;background:${fill}`;
+    row.querySelector(".supply-level").textContent = known ? `${supply.level}%` : "?";
+    return row;
+  }
+
+  function renderPrinters(data) {
+    const printers = data.printers || [];
+    const signature = JSON.stringify(printers);
+    if (signature === panelSignature) return;
+    panelSignature = signature;
+    panel.replaceChildren(...printers.map((p) => {
+      const card = document.createElement("div");
+      card.className = "card printer-card";
+      const alert = printerAlert(p);
+      let state = p.ok ? (p.queued ? `Printing (${p.queued})` : "Ready") : "Offline";
+      let cls = p.ok ? "ok" : "bad";
+      if (alert && alert.severity === "error") [state, cls] = [alert.text, "bad"];
+      card.innerHTML = `
+        <div class="printer-head">
+          <strong></strong>
+          <span class="badge ${cls === "ok" ? "done" : cls === "bad" ? "cancelled" : "waiting"}"></span>
+        </div>
+        <ul class="alert-list"></ul>
+        <div class="supplies"></div>`;
+      card.querySelector("strong").textContent = printerLabel(p);
+      card.querySelector(".badge").textContent = state;
+      const alerts = card.querySelector(".alert-list");
+      for (const a of p.alerts || []) {
+        if (a.text === state) continue;
+        const li = document.createElement("li");
+        li.className = a.severity;
+        li.textContent = a.text;
+        alerts.appendChild(li);
+      }
+      const supplies = card.querySelector(".supplies");
+      (p.supplies || []).forEach((sup) => supplies.appendChild(supplyBar(sup)));
+      if (!(p.supplies || []).length) {
+        supplies.innerHTML = '<span class="hint">This printer doesn\'t report ink or toner levels.</span>';
+      }
+      return card;
+    }));
+    if (!printers.length) panel.innerHTML = '<p class="hint">No printers set up yet.</p>';
+  }
+
+  renderPrinters(overviewData);
+  document.addEventListener("overview", (e) => renderPrinters(e.detail));
+
   // The page arrives with the queue embedded, then refreshes in the background.
   render(window.INITIAL_QUEUE || { active: [], recent: [] });
   setInterval(() => document.visibilityState === "visible" && load(), 5000);

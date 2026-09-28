@@ -20,7 +20,7 @@
       {% endfor %}
     </div>
   </div>
-  <p class="hint id-size">Printed at real size: {{ card.w_mm }} &times; {{ card.h_mm|int }} mm</p>
+  <p class="hint id-size">Printed at {{ card.w_mm }} &times; {{ card.h_mm|int }} mm</p>
 
   <div class="card options">
     {% include "_print_target.html" %}
@@ -47,7 +47,7 @@
   </div>
 </section>
 
-<input id="file-input" type="file" accept="image/*" hidden>
+<input id="file-input" type="file" accept="image/*,.heic,.heif" hidden>
 {% include "_editor.html" %}
 {% endblock %}
 {% block scripts %}

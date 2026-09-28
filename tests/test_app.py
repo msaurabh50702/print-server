@@ -304,9 +304,13 @@ def test_parse_lpstat_printers():
 
 def test_parse_lpoptions_colour_and_duplex():
     hp = printing.parse_lpoptions(HP_OPTIONS)
-    assert hp == {"duplex": False, "color": True, "mono_option": ("ColorModel", "KGray")}
+    assert (hp["duplex"], hp["color"], hp["mono_option"]) == (False, True, ("ColorModel", "KGray"))
+    assert hp["quality"]["key"] == "OutputMode"
+    assert [c["label"] for c in hp["quality"]["choices"]] == ["Draft (saves ink)", "Normal", "Best"]
     canon = printing.parse_lpoptions(CANON_OPTIONS)
-    assert canon == {"duplex": True, "color": False, "mono_option": None}
+    assert (canon["duplex"], canon["color"], canon["mono_option"]) == (True, False, None)
+    assert canon["paper"] is None
+    assert canon["quality"]["key"] == "CNTonerSaving" and canon["quality"]["default"] == "False"
 
 
 def test_parse_lpstat_jobs():
@@ -345,10 +349,17 @@ class FakeCups:
         return subprocess.CompletedProcess(args, code, out, "")
 
 
+HP_IPP = {"marker-names": ["Black ink", "Tri-color ink"], "marker-levels": [8, 60],
+          "marker-colors": ["#000000", "#00FFFF#FF00FF#FFFF00"], "marker-low-levels": [10, 10],
+          "printer-state-reasons": ["media-empty-error"]}
+
+
 @pytest.fixture
 def cups(monkeypatch, tmp_path):
     fake = FakeCups()
     monkeypatch.setattr(printing, "_run", fake)
+    monkeypatch.setattr(printing, "ipp_printer_attributes",
+                        lambda name: HP_IPP if name == "HP_DeskJet_3835" else {})
     monkeypatch.setattr(printing, "PPD_DIR", tmp_path / "ppd")
     printing.invalidate()
     printing._caps_cache.clear()
@@ -460,7 +471,13 @@ print-scaling/Print Scaling: *auto auto-fit fill fit none
 
 def test_hp_deskjet_3835_capabilities():
     caps = printing.parse_lpoptions(HP_DESKJET_3835_OPTIONS)
-    assert caps == {"duplex": False, "color": True, "mono_option": ("ColorModel", "Gray")}
+    assert (caps["duplex"], caps["color"], caps["mono_option"]) == (False, True, ("ColorModel", "Gray"))
+    assert caps["paper"]["key"] == "MediaType" and caps["paper"]["default"] == "Stationery"
+    assert [c["label"] for c in caps["paper"]["choices"]] == [
+        "Plain paper", "Photo glossy", "HP glossy", "HP matte"]
+    assert caps["quality"] == {"key": "cupsPrintQuality", "default": "Normal", "choices": [
+        {"value": "Draft", "label": "Draft (saves ink)"}, {"value": "Normal", "label": "Normal"},
+        {"value": "High", "label": "Best"}]}
 
 
 def test_printer_state_is_cached_between_requests(live_client, cups):
@@ -611,3 +628,184 @@ def test_share_ids_are_validated(client):
                           content_type="multipart/form-data").get_json()["id"]
     assert client.get(f"/api/documents/{doc}/original").status_code == 200
     assert client.get(f"/api/documents/{pdf_doc}/original").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Paper type, quality, scaling
+# ---------------------------------------------------------------------------
+
+def test_driver_options_only_allow_printer_choices():
+    caps = printing.parse_lpoptions(HP_DESKJET_3835_OPTIONS)
+    assert printing.driver_options(caps, "PhotographicGlossy", "High") == [
+        ("MediaType", "PhotographicGlossy"), ("cupsPrintQuality", "High")]
+    assert printing.driver_options(caps, "evil -o x", "Ultra") == []
+    assert printing.driver_options({"paper": None, "quality": None}, "PhotographicGlossy", "High") == []
+
+
+def test_lp_args_scaling_and_extra_options():
+    fit = printing.build_lp_args("/x.pdf", "P", fit_to_page=True)
+    assert "fit-to-page" in fit and "print-scaling=fit" in fit
+    actual = printing.build_lp_args("/x.pdf", "P", fit_to_page=False,
+                                    extra_options=[("MediaType", "PhotographicGlossy")])
+    assert "print-scaling=none" in actual and "fit-to-page" not in actual
+    assert "MediaType=PhotographicGlossy" in actual
+
+
+def test_paper_and_quality_reach_the_printer(live_client, cups):
+    resp = live_client.post("/api/photos/print", data={
+        "layout": "1", "cell0": (jpeg(), "a.jpg"), "printer": "HP_DeskJet_3835",
+        "paper": "Com.hp.specialtyGlossy", "quality": "Best"}, content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    lp = next(c for c in cups.calls if c[0] == "lp")
+    # HP_OPTIONS (hpcups) has no MediaType; quality "Best" is a valid OutputMode.
+    assert "OutputMode=Best" in lp and not any(a.startswith("MediaType=") for a in lp)
+    assert "print-scaling=none" in lp  # photo sheets print exactly as composed
+
+
+def test_document_actual_size(live_client, cups):
+    doc = upload_image_doc(live_client)
+    live_client.post("/api/documents/print", json={"documents": [{"id": doc}], "fit_to_page": False})
+    lp = next(c for c in cups.calls if c[0] == "lp")
+    assert "print-scaling=none" in lp and "fit-to-page" not in lp
+    cups.calls.clear()
+    live_client.post("/api/documents/print", json={"documents": [{"id": doc}]})
+    assert "fit-to-page" in next(c for c in cups.calls if c[0] == "lp")
+
+
+# ---------------------------------------------------------------------------
+# Ink / toner levels and alerts
+# ---------------------------------------------------------------------------
+
+def ipp_response(attrs):
+    """Build a minimal IPP Get-Printer-Attributes response."""
+    import struct
+    body = struct.pack(">BBHI", 2, 0, 0, 1) + b"\x01" + b"\x04"
+    for name, values in attrs.items():
+        for i, value in enumerate(values):
+            key = name.encode() if i == 0 else b""
+            if isinstance(value, int):
+                tag, raw = 0x21, struct.pack(">i", value)
+            else:
+                tag, raw = 0x41 if name == "marker-names" else 0x44, value.encode()
+            body += struct.pack(">BH", tag, len(key)) + key + struct.pack(">H", len(raw)) + raw
+    return body + b"\x03"
+
+
+def test_ipp_request_and_response_roundtrip():
+    request = printing.build_ipp_request("HP_DeskJet_3835")
+    assert request[:4] == b"\x02\x00\x00\x0b"
+    assert b"ipp://localhost/printers/HP_DeskJet_3835" in request and request.endswith(b"\x03")
+    parsed = printing.parse_ipp_response(ipp_response(HP_IPP))
+    assert parsed["marker-levels"] == [8, 60]
+    assert parsed["printer-state-reasons"] == ["media-empty-error"]
+    assert printing.parse_ipp_response(b"\x02\x00\x04\x00\x00\x00\x00\x01\x03") == {}  # error status
+
+
+def test_supplies_and_alerts():
+    supplies, alerts = printing.supplies_and_alerts(HP_IPP)
+    assert supplies[0] == {"name": "Black ink", "level": 8, "color": "#000000", "low": True}
+    assert supplies[1]["color"] == "multi" and not supplies[1]["low"]
+    assert alerts[0] == {"text": "Out of paper", "severity": "error"}
+    assert {"text": "Black ink low", "severity": "warning"} in alerts
+    assert printing.supplies_and_alerts({}) == ([], [])
+    _, alerts = printing.supplies_and_alerts({"printer-state-reasons": ["offline-report", "none"]})
+    assert alerts == [{"text": "Printer not connected", "severity": "error"}]
+
+
+def test_alerts_shown_in_status_and_printer_list(live_client):
+    data = live_client.get("/api/printers").get_json()
+    hp = next(p for p in data["printers"] if p["name"] == "HP_DeskJet_3835")
+    assert hp["alerts"][0]["text"] == "Out of paper" and hp["supplies"][0]["level"] == 8
+    status = live_client.get("/api/status?printer=HP_DeskJet_3835").get_json()
+    assert status["printer"] == "HP_DeskJet_3835"
+    label, ok = printing.status_label(hp)
+    assert (label, ok) == ("Out of paper", False)
+
+
+# ---------------------------------------------------------------------------
+# HEIC photos
+# ---------------------------------------------------------------------------
+
+def heic_bytes(color="green", size=(120, 80)):
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, format="HEIF")
+    buf.seek(0)
+    return buf
+
+
+import importlib.util  # noqa: E402
+
+needs_heif = pytest.mark.skipif(importlib.util.find_spec("pillow_heif") is None,
+                                reason="pillow-heif not installed")
+
+
+@needs_heif
+def test_heic_document_upload(client):
+    resp = client.post("/api/documents", data={"file": (heic_bytes(), "IMG_0001.HEIC")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["pages"] == 1 and resp.get_json()["image"]
+
+
+@needs_heif
+def test_heic_converted_to_jpeg_for_editors(client):
+    resp = client.post("/api/images/jpeg", data={"file": (heic_bytes(size=(300, 200)), "a.heic")},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 200 and resp.mimetype == "image/jpeg"
+    assert Image.open(io.BytesIO(resp.data)).size == (300, 200)
+    bad = client.post("/api/images/jpeg", data={"file": (io.BytesIO(b"nope"), "x.heic")},
+                      content_type="multipart/form-data")
+    assert bad.status_code == 400
+
+
+@needs_heif
+def test_heic_shared_without_extension(client):
+    resp = client.post("/share", data={"files": [(heic_bytes(), "shared", "image/heic")]},
+                       content_type="multipart/form-data")
+    assert "/shared/" in resp.headers["Location"]
+
+
+# ---------------------------------------------------------------------------
+# Free size
+# ---------------------------------------------------------------------------
+from printserver.photos import compose_free  # noqa: E402
+
+
+def test_compose_free_places_photo_at_exact_size():
+    dpi = 100
+    page = compose_free([(jpeg("red", (400, 300)), 20, 30, 100, 75)], dpi=dpi)
+    px = lambda mm: round(mm / 25.4 * dpi)  # noqa: E731
+    assert page.getpixel((px(20) + 2, px(30) + 2))[0] > 200            # inside the photo
+    assert page.getpixel((px(20) - 3, px(30) + 5)) == (255, 255, 255)   # just left of it
+    assert page.getpixel((px(120) + 3, px(60))) == (255, 255, 255)      # just right of it
+    assert page.getpixel((px(119) - 1, px(104) - 1))[0] > 200            # bottom-right corner
+
+
+def test_compose_free_clips_and_validates():
+    page = compose_free([(jpeg("blue"), -50, -50, 100, 100)], dpi=50)  # partly off the page
+    assert page.getpixel((2, 2))[2] > 200
+    for bad in [(10, 10, 0, 10), (10, 10, 10, float("nan")), (10, 10, 1e9, 10)]:
+        with pytest.raises(ValueError):
+            compose_free([(jpeg(), *bad)], dpi=50)
+    with pytest.raises(ValueError):
+        compose_free([], dpi=50)
+
+
+def test_free_size_print_and_pdf(client, app):
+    layout = json.dumps([{"x": 10, "y": 10, "w": 90, "h": 60}, {"x": 110, "y": 10, "w": 90, "h": 60}])
+    resp = client.post("/api/free-size/print", data={
+        "items": layout, "item0": (jpeg(), "a.jpg"), "item1": (jpeg("blue"), "b.jpg"),
+        "printer": "Test_Colour_Inkjet", "paper": "PhotographicGlossy"},
+        content_type="multipart/form-data")
+    assert resp.status_code == 200, resp.get_json()
+    out = app.config["DRY_RUN_DIR"] / f"{resp.get_json()['job']}.pdf"
+    assert round(float(PdfReader(str(out)).pages[0].mediabox.width) / 72 * 25.4) == 210
+    pdf = client.post("/api/free-size/pdf", data={"items": layout, "item0": (jpeg(), "a.jpg"),
+                                                  "item1": (jpeg(), "b.jpg")},
+                      content_type="multipart/form-data")
+    assert pdf.status_code == 200 and pdf.data.startswith(b"%PDF")
+    missing = client.post("/api/free-size/print", data={"items": layout, "item0": (jpeg(), "a.jpg")},
+                          content_type="multipart/form-data")
+    assert missing.status_code == 400
+    assert client.post("/api/free-size/print", data={"items": "not json"}).status_code == 400
+    assert client.get("/free-size").status_code == 200

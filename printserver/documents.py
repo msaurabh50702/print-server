@@ -6,7 +6,16 @@ from pathlib import Path
 from PIL import Image, ImageOps
 from pypdf import PdfReader
 
+try:  # HEIC/HEIF photos (iPhone, many Samsung phones)
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIF_SUPPORTED = True
+except ImportError:  # pragma: no cover - optional dependency
+    HEIF_SUPPORTED = False
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
+if HEIF_SUPPORTED:
+    IMAGE_EXTS |= {".heic", ".heif"}
 OFFICE_EXTS = {".doc", ".docx", ".odt", ".rtf", ".txt", ".xls", ".xlsx", ".ods",
                ".csv", ".ppt", ".pptx", ".odp"}
 ALLOWED_EXTS = {".pdf"} | IMAGE_EXTS | OFFICE_EXTS
@@ -74,3 +83,17 @@ def render_page(pdf_path, page_number, out_path, width=900):
          "-scale-to-x", str(width), "-scale-to-y", "-1", str(pdf_path), str(prefix)],
         check=True, capture_output=True, timeout=60)
     return out_path
+
+
+def to_jpeg(source, max_side=4000, quality=92):
+    """Any supported image (including HEIC) as JPEG bytes, upright and in RGB.
+
+    Used when the phone's browser can't display a photo format itself.
+    """
+    import io
+    with Image.open(source) as img:
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, "JPEG", quality=quality)
+    return out.getvalue()

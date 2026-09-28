@@ -8,12 +8,16 @@ are needed on the phone or laptop.
 - **Print photos**: pick how many photos go on one A4 page (1, 2, 4, 6, 8, 9, 12 or 16).
   Tap each box in the grid to add a photo, then crop, rotate, change or remove it.
   "Fill all" repeats one photo in every empty box, which is handy for passport-style sheets.
+- **Free size**: add one or more photos, crop them, then place them anywhere on a blank A4 page.
+  Drag to move, pull the corner (or pinch) to resize, or type an exact width/height in cm. The size
+  shown is the printed size. It also has centre snapping, *Fit page*, *Duplicate* and a warning when
+  something is outside the printable area.
 - **Passport photos**: add one photo, crop it with a face-position oval guide, pick the size
   (35 × 45 mm for India/UK/EU, 2 × 2 in for the US, or 20 × 25 mm stamp size) and how many
   (4, 8, 12 or a full page). Photos are tiled at real size from the top-left corner with cutting guides.
 - **ID card copy**: photograph or upload the front and back of an ID card (Aadhaar, PAN,
   driving licence, bank card and similar), crop each one to the card's edges, and print both on one
-  A4 page at real card size (85.6 × 54 mm), with an optional cutting guide.
+  A4 page at 125.6 × 94 mm each (set by `ID_CARD_MM` in `photos.py`), with an optional cutting guide.
 - **Print documents**: select one or several PDF, Word, Excel, PowerPoint, text or image files
   at once (up to 20). Reorder or remove them, preview the pages, and optionally set a page range
   for each document. Then print them all with shared copies and one- or two-sided settings.
@@ -21,6 +25,12 @@ are needed on the phone or laptop.
 - **Several printers**: every print page has a printer picker (for example the Canon laser and an
   HP DeskJet inkjet). It remembers your choice per phone and only shows options the printer supports:
   **Colour / Black & white** for colour printers and **Two-sided** for printers with automatic duplex.
+- **Paper and quality**: printers that offer them get *Paper* (e.g. Plain / Photo glossy) and
+  *Quality* (Draft / Normal / Best, or *Toner save* on Canon lasers) menus, remembered per printer.
+- **Ink, toner and paper warnings**: the status pill shows alerts like *Out of paper* or *Black ink low*,
+  and the queue page shows ink/toner levels for printers that report them.
+- **HEIC photos** (iPhone / Samsung) work everywhere; the Pi converts them when the phone's browser can't.
+- **Documents: Fit to page or Actual size.** Use *Actual size* for forms that must print at their exact size.
 - **Print queue**: tap the status pill to see what's printing or waiting on each printer, cancel jobs,
   and see recently sent jobs.
 - Mobile-first web UI with a sticky bottom action bar, a touch crop editor,
@@ -153,7 +163,7 @@ pytest
 - `printserver/photos.py` builds the A4 sheet at 300 DPI with Pillow. Crop and rotate happen
   in the browser (`static/js/editor.js`), and the server receives one cropped JPEG per box.
 - The ID card page reuses the same editor, locked to the ID-1 card shape. `compose_id_card` in
-  `photos.py` places the front in the top half and the back in the bottom half at 85.6 × 54 mm.
+  `photos.py` places the front in the top half and the back in the bottom half at `ID_CARD_MM` size.
   Jobs are sent without fit-to-page scaling, so the copy prints at 100%.
 - `compose_passport` tiles one photo at its exact size. Sizes are defined in `PASSPORT_SIZES`
   in `photos.py`, so it's easy to add another country's size.
