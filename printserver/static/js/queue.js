@@ -59,22 +59,35 @@
     refreshStatus();
   }
 
+  let lastRendered = "";
+  function render(data) {
+    // Skip redrawing when nothing changed (except "x min ago" labels, which
+    // are refreshed at least once a minute).
+    const signature = JSON.stringify(data) + Math.floor(Date.now() / 60000);
+    if (signature === lastRendered) return;
+    lastRendered = signature;
+    activeList.replaceChildren(...data.active.map((job) =>
+      jobItem(job, true, job.state === "printing" ? 0 : job.rank)));
+    document.getElementById("active-empty").hidden = data.active.length > 0;
+    recentList.replaceChildren(...data.recent.map((job) => jobItem(job, false)));
+    document.getElementById("recent-empty").hidden = data.recent.length > 0;
+  }
+
+  let loading = false;
   async function load() {
+    if (loading) return;
+    loading = true;
     try {
-      const data = await (await fetch("/api/queue")).json();
-      const perPrinter = {};
-      activeList.replaceChildren(...data.active.map((job) => {
-        perPrinter[job.printer] = (perPrinter[job.printer] || 0) + 1;
-        return jobItem(job, true, perPrinter[job.printer]);
-      }));
-      document.getElementById("active-empty").hidden = data.active.length > 0;
-      recentList.replaceChildren(...data.recent.map((job) => jobItem(job, false)));
-      document.getElementById("recent-empty").hidden = data.recent.length > 0;
+      render(await (await fetch("/api/queue")).json());
     } catch (_) {
       toast("Could not load the queue", "error");
+    } finally {
+      loading = false;
     }
   }
 
-  load();
-  setInterval(() => document.visibilityState === "visible" && load(), 4000);
+  // The page arrives with the queue embedded, then refreshes in the background.
+  render(window.INITIAL_QUEUE || { active: [], recent: [] });
+  setInterval(() => document.visibilityState === "visible" && load(), 5000);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && load());
 })();

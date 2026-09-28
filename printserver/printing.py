@@ -1,7 +1,16 @@
-"""Thin wrapper around the CUPS command line tools (lp, lpstat, lpq, cancel)."""
+"""Thin wrapper around the CUPS command line tools (lp, lpstat, lpoptions, cancel).
+
+Reading CUPS state means starting several processes, which is slow on a
+Raspberry Pi, so printer/job state is read in one go into a short-lived
+snapshot shared by all requests, and printer capabilities (which only change
+when a printer is reconfigured) are cached separately.
+"""
+import copy
+import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -9,6 +18,10 @@ from pathlib import Path
 # CUPS queue names: letters, digits, _ - . (no spaces or slashes).
 PRINTER_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,127}$")
 CUPS_JOB_ID_RE = re.compile(r"^([A-Za-z0-9_.\-]{1,127})-(\d{1,9})$")
+
+SNAPSHOT_TTL = 2.0        # seconds printer/job state is reused between requests
+CAPS_TTL = 600.0          # fallback lifetime of capabilities when the PPD can't be stat'ed
+PPD_DIR = Path("/etc/cups/ppd")
 
 # Printers shown in dry-run mode, so the UI can be tried without CUPS.
 DRY_RUN_PRINTERS = [
@@ -33,36 +46,48 @@ def _run(args, timeout=20):
     return result
 
 
-def default_printer():
-    result = _run(["lpstat", "-d"])
-    match = re.search(r"system default destination:\s*(\S+)", result.stdout)
-    return match.group(1) if match else None
-
-
 # ---------------------------------------------------------------------------
-# Printers and their capabilities
+# Parsers
 # ---------------------------------------------------------------------------
 
 def parse_lpstat_printers(text):
-    """Parse `lpstat -l -p` output into [{name, description, state, ok}]."""
+    """Parse `lpstat -l -p` into [{name, description, state, ok, printing_job}]."""
     printers, current = [], None
     for line in text.splitlines():
         match = re.match(r"^printer (\S+) (.*)$", line)
         if match:
             name, rest = match.groups()
+            job = re.search(r"now printing (\S+?)\.?(\s|$)", rest)
             if "disabled" in rest:
                 state = "disabled"
-            elif "now printing" in rest:
+            elif job:
                 state = "printing"
             else:
                 state = "idle"
-            current = {"name": name, "description": name, "state": state, "ok": state != "disabled"}
+            current = {"name": name, "description": name, "state": state,
+                       "ok": state != "disabled", "printing_job": job.group(1) if job else None}
             printers.append(current)
             continue
         match = re.match(r"^\s+Description:\s*(.+)$", line)
         if match and current:
             current["description"] = match.group(1).strip()
     return printers
+
+
+def parse_lpstat_jobs(text):
+    """Parse `lpstat -o` (all queued jobs, in queue order)."""
+    jobs = []
+    for line in text.splitlines():
+        match = re.match(r"^(\S+)\s+(\S+)\s+(\d+)\s+(.*)$", line)
+        if not match:
+            continue
+        job_id, owner, size, _date = match.groups()
+        id_match = CUPS_JOB_ID_RE.match(job_id)
+        if not id_match:
+            continue
+        jobs.append({"id": job_id, "printer": id_match.group(1), "owner": owner,
+                     "size": int(size), "title": "", "state": "waiting"})
+    return jobs
 
 
 def parse_lpoptions(text):
@@ -97,107 +122,157 @@ def parse_lpoptions(text):
     return {"duplex": duplex, "color": color, "mono_option": mono_option}
 
 
+# ---------------------------------------------------------------------------
+# Cached state
+# ---------------------------------------------------------------------------
+
+_lock = threading.Lock()
+_snapshot = {"time": 0.0, "data": None}
+_caps_cache = {}   # name -> (ppd_mtime, fetched_at, caps)
+
+
+def _ppd_mtime(name):
+    try:
+        return os.stat(PPD_DIR / f"{name}.ppd").st_mtime
+    except OSError:
+        return None
+
+
 def printer_capabilities(name):
-    """Capabilities of one printer. Falls back to 'duplex allowed, mono only'."""
+    """Capabilities of one printer, cached until its PPD changes.
+
+    Falls back to 'duplex allowed, mono only' when the options can't be read.
+    """
+    mtime = _ppd_mtime(name)
+    cached = _caps_cache.get(name)
+    if cached:
+        cached_mtime, fetched, caps = cached
+        if cached_mtime == mtime and (mtime is not None or time.time() - fetched < CAPS_TTL):
+            return caps
     result = _run(["lpoptions", "-p", name, "-l"])
     if result.returncode != 0 or not result.stdout.strip():
-        return {"duplex": True, "color": False, "mono_option": None}
-    return parse_lpoptions(result.stdout)
+        caps = {"duplex": True, "color": False, "mono_option": None}
+    else:
+        caps = parse_lpoptions(result.stdout)
+    _caps_cache[name] = (mtime, time.time(), caps)
+    return caps
+
+
+def _read_cups():
+    printers = parse_lpstat_printers(_run(["lpstat", "-l", "-p"]).stdout)
+    default = re.search(r"system default destination:\s*(\S+)", _run(["lpstat", "-d"]).stdout)
+    default = default.group(1) if default else None
+    jobs = parse_lpstat_jobs(_run(["lpstat", "-o"]).stdout) if printers else []
+
+    positions = {}
+    printing = {p["printing_job"] for p in printers if p["printing_job"]}
+    for job in jobs:
+        if job["id"] in printing:
+            job["state"], job["rank"] = "printing", 0
+        else:
+            positions[job["printer"]] = positions.get(job["printer"], 0) + 1
+            job["rank"] = positions[job["printer"]]
+
+    for printer in printers:
+        caps = printer_capabilities(printer["name"])
+        printer.update(is_default=printer["name"] == default, duplex=caps["duplex"],
+                       color=caps["color"],
+                       queued=sum(1 for j in jobs if j["printer"] == printer["name"]))
+        del printer["printing_job"]
+    return {"printers": printers, "default": default, "jobs": jobs}
+
+
+def snapshot(dry_run=False, fresh=False):
+    """Printers (with capabilities) and active jobs. Never raises.
+
+    Results are shared for SNAPSHOT_TTL seconds; concurrent callers wait for a
+    single refresh instead of each starting their own lpstat processes.
+    """
+    if dry_run:
+        return {"printers": [dict(p, queued=0) for p in DRY_RUN_PRINTERS],
+                "default": "Test_Mono_Laser", "jobs": []}
+    with _lock:
+        data = _snapshot["data"]
+        if fresh or data is None or time.time() - _snapshot["time"] > SNAPSHOT_TTL:
+            try:
+                data = _read_cups()
+            except PrintError:
+                data = {"printers": [], "default": None, "jobs": []}
+            _snapshot.update(time=time.time(), data=data)
+        return copy.deepcopy(data)
+
+
+def invalidate():
+    """Forget the snapshot, e.g. right after a job was sent or cancelled."""
+    with _lock:
+        _snapshot["data"] = None
 
 
 def list_printers(dry_run=False):
-    """All CUPS printers with state and capabilities. Never raises."""
-    if dry_run:
-        return [dict(p) for p in DRY_RUN_PRINTERS]
-    try:
-        printers = parse_lpstat_printers(_run(["lpstat", "-l", "-p"]).stdout)
-        default = default_printer()
-        for printer in printers:
-            printer["is_default"] = printer["name"] == default
-            caps = printer_capabilities(printer["name"])
-            printer["duplex"], printer["color"] = caps["duplex"], caps["color"]
-    except PrintError:
-        return []
-    return printers
+    return snapshot(dry_run)["printers"]
 
 
-def resolve_printer(requested, configured, dry_run=False):
+def active_jobs(dry_run=False, fresh=False):
+    return snapshot(dry_run, fresh)["jobs"]
+
+
+def resolve_printer(requested, configured, dry_run=False, state=None):
     """Pick the printer for a job and check it exists.
 
     requested: printer chosen in the UI (may be empty).
     configured: PRINTER_NAME from the settings (may be empty).
     """
-    printers = list_printers(dry_run)
-    names = [p["name"] for p in printers]
+    state = state or snapshot(dry_run)
+    names = [p["name"] for p in state["printers"]]
     if requested:
         if not PRINTER_NAME_RE.match(requested) or requested not in names:
             raise PrintError(f"Printer '{requested}' is not available")
         return requested
     if configured and configured in names:
         return configured
-    for printer in printers:
-        if printer.get("is_default"):
-            return printer["name"]
+    if state["default"] in names:
+        return state["default"]
     if names:
         return names[0]
     raise PrintError("No printer configured. Run scripts/setup-printer.sh on the Pi.")
 
 
+def status_label(printer, dry_run=False):
+    """Short text + ok flag for the status pill."""
+    if not printer:
+        return "No printer", False
+    if dry_run:
+        return "Test mode", True
+    if not printer["ok"]:
+        return "Offline", False
+    return (f"Printing ({printer['queued']})" if printer["queued"] else "Ready"), True
+
+
 def printer_status(requested, configured, dry_run=False):
     """Status of the chosen (or default) printer. Never raises."""
-    printers = list_printers(dry_run)
-    if not printers:
+    state = snapshot(dry_run)
+    if not state["printers"]:
         return {"ok": False, "printer": None, "printers": 0,
                 "message": "No printer configured. Run scripts/setup-printer.sh on the Pi."}
     try:
-        name = resolve_printer(requested, configured, dry_run)
+        name = resolve_printer(requested, configured, dry_run, state)
     except PrintError:
-        name = resolve_printer("", configured, dry_run)
-    printer = next(p for p in printers if p["name"] == name)
-    queued = 0 if dry_run else len(active_jobs([name]))
+        name = resolve_printer("", configured, dry_run, state)
+    printer = next(p for p in state["printers"] if p["name"] == name)
     return {"ok": printer["ok"], "printer": name, "description": printer["description"],
-            "state": printer["state"], "printers": len(printers), "queued_jobs": queued,
+            "state": printer["state"], "printers": len(state["printers"]),
+            "queued_jobs": printer["queued"],
             "message": f"{printer['description']}: {printer['state']}"}
 
 
-# ---------------------------------------------------------------------------
-# Queue
-# ---------------------------------------------------------------------------
-
-def parse_lpq(text, printer):
-    """Parse `lpq -P PRINTER` output into a list of active/waiting jobs."""
-    jobs = []
-    for line in text.splitlines():
-        match = re.match(r"^(\S+)\s+(\S+)\s+(\d+)\s+(.*?)\s+(\d+) bytes\s*$", line)
-        if not match or match.group(1) == "Rank":
-            continue
-        rank, owner, number, title, size = match.groups()
-        jobs.append({"id": f"{printer}-{number}", "printer": printer, "rank": rank,
-                     "state": "printing" if rank == "active" else "waiting",
-                     "owner": owner, "title": title.strip(), "size": int(size)})
-    return jobs
-
-
-def active_jobs(printer_names):
-    """Jobs still printing or waiting on the given printers."""
-    jobs = []
-    for name in printer_names:
-        try:
-            result = _run(["lpq", "-P", name])
-        except PrintError:
-            continue
-        if result.returncode == 0:
-            jobs.extend(parse_lpq(result.stdout, name))
-    return jobs
-
-
-def cancel_job(job_id, printer_names):
+def cancel_job(job_id):
     """Cancel an active job. Only jobs currently in the queue can be cancelled."""
     if not CUPS_JOB_ID_RE.match(job_id or ""):
         raise PrintError("Invalid job")
-    if job_id not in {job["id"] for job in active_jobs(printer_names)}:
+    if job_id not in {job["id"] for job in active_jobs(fresh=True)}:
         raise PrintError("This job has already finished or was cancelled")
     result = _run(["cancel", job_id])
+    invalidate()
     if result.returncode != 0:
         raise PrintError(result.stderr.strip() or "Could not cancel the job")
 
@@ -270,6 +345,7 @@ def submit(pdf_path, printer, dry_run, dry_run_dir, copies=1, page_ranges=None,
     args = build_lp_args(pdf_path, printer, copies, page_ranges, duplex, fit_to_page,
                          title, mono, caps["mono_option"] if mono else None)
     result = _run(args, timeout=60)
+    invalidate()
     if result.returncode != 0:
         raise PrintError(result.stderr.strip() or "lp failed")
     match = re.search(r"request id is (\S+)", result.stdout)

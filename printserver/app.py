@@ -51,6 +51,41 @@ def create_app(config=None):
             abort(404)
         return path
 
+    def overview():
+        """Printers, their status and the default printer, for the UI.
+
+        Embedded in every page (so nothing has to load after the page opens)
+        and served by /api/printers for the periodic refresh.
+        """
+        dry_run = app.config["DRY_RUN"]
+        state = printing.snapshot(dry_run)
+        try:
+            default = printing.resolve_printer("", app.config["PRINTER_NAME"], dry_run, state)
+        except printing.PrintError:
+            default = None
+        default_info = next((p for p in state["printers"] if p["name"] == default), None)
+        label, ok = printing.status_label(default_info, dry_run)
+        return {"printers": state["printers"], "default": default, "dry_run": dry_run,
+                "status": {"text": label, "ok": ok}}
+
+    def queue_data():
+        dry_run = app.config["DRY_RUN"]
+        active = printing.active_jobs(dry_run)
+        by_id = {job["id"]: job for job in active}
+        recent = []
+        for entry in history.recent():
+            job = by_id.get(entry["id"])
+            if job:
+                job.update(title=entry["title"], time=entry["time"], copies=entry.get("copies", 1))
+                continue
+            state = "cancelled" if entry.get("cancelled") else "done"
+            recent.append({**entry, "state": state})
+        return {"active": active, "recent": recent[:20]}
+
+    @app.context_processor
+    def inject_boot():
+        return {"boot": overview()}
+
     def print_target(options):
         """(printer, colour mode) chosen in the UI, validated against CUPS."""
         printer = printing.resolve_printer(
@@ -109,7 +144,7 @@ def create_app(config=None):
 
     @app.get("/queue")
     def queue_page():
-        return render_template("queue.html")
+        return render_template("queue.html", initial_queue=queue_data())
 
     @app.get("/document")
     def document_page():
@@ -128,36 +163,17 @@ def create_app(config=None):
 
     @app.get("/api/printers")
     def printers_list():
-        printers = printing.list_printers(app.config["DRY_RUN"])
-        try:
-            default = printing.resolve_printer("", app.config["PRINTER_NAME"], app.config["DRY_RUN"])
-        except printing.PrintError:
-            default = None
-        return jsonify(printers=printers, default=default)
+        return jsonify(overview())
 
     @app.get("/api/queue")
     def queue_list():
-        names = [p["name"] for p in printing.list_printers(app.config["DRY_RUN"])]
-        active = [] if app.config["DRY_RUN"] else printing.active_jobs(names)
-        by_id = {job["id"]: job for job in active}
-        recent = []
-        for entry in history.recent():
-            job = by_id.get(entry["id"])
-            if job:
-                # lpq may shorten titles; the app's own record has the full one.
-                job["title"] = entry["title"]
-                job["time"] = entry["time"]
-                continue
-            state = "cancelled" if entry.get("cancelled") else "done"
-            recent.append({**entry, "state": state})
-        return jsonify(active=active, recent=recent[:20])
+        return jsonify(queue_data())
 
     @app.post("/api/queue/<job_id>/cancel")
     def queue_cancel(job_id):
         if app.config["DRY_RUN"]:
             raise printing.PrintError("Test mode: jobs are saved as PDFs, nothing to cancel")
-        names = [p["name"] for p in printing.list_printers()]
-        printing.cancel_job(job_id, names)
+        printing.cancel_job(job_id)
         history.mark_cancelled(job_id)
         return jsonify(ok=True)
 

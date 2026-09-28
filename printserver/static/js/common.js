@@ -79,59 +79,74 @@ function applyPrinterCaps() {
   document.dispatchEvent(new CustomEvent("printerchange", { detail: info || null }));
 }
 
-async function loadPrinters() {
+function renderPrinterSelect(defaultName) {
   const select = document.getElementById("printer-select");
-  try {
-    const data = await (await fetch("/api/printers")).json();
-    printersInfo = data.printers || [];
-    if (select) {
-      select.innerHTML = "";
-      select.disabled = !printersInfo.length;
-      if (!printersInfo.length) {
-        select.add(new Option("No printer set up", ""));
-      }
-      for (const p of printersInfo) {
-        let label = printerLabel(p);
-        if (p.state === "disabled") label += " (offline)";
-        else if (p.is_default && printersInfo.length > 1) label += " · default";
-        select.add(new Option(label, p.name));
-      }
-      const saved = storedPrinter();
-      select.value = printersInfo.some((p) => p.name === saved) ? saved : data.default || "";
-    }
-  } catch (_) {
-    if (select) select.innerHTML = '<option value="">Printer list unavailable</option>';
-  }
-  applyPrinterCaps();
-  refreshStatus();
+  if (!select) return;
+  const options = printersInfo.map((p) => {
+    let label = printerLabel(p);
+    if (p.state === "disabled") label += " (offline)";
+    else if (p.is_default && printersInfo.length > 1) label += " · default";
+    return [p.name, label];
+  });
+  // Rebuild only when the list actually changed, so a background refresh
+  // never disturbs someone who is choosing a printer.
+  const signature = JSON.stringify(options);
+  if (select.dataset.signature === signature) return false;
+  const current = select.value || storedPrinter();
+  select.dataset.signature = signature;
+  select.replaceChildren(...(options.length
+    ? options.map(([value, label]) => new Option(label, value))
+    : [new Option("No printer set up", "")]));
+  select.disabled = !options.length;
+  select.value = options.some(([name]) => name === current) ? current : defaultName || "";
+  return true;
+}
+
+function renderStatus() {
+  const el = document.getElementById("printer-status");
+  const info = selectedPrinterInfo();
+  let text, ok;
+  if (!info) [text, ok] = ["No printer", false];
+  else if (overviewData.dry_run) [text, ok] = ["Test mode", true];
+  else if (!info.ok) [text, ok] = ["Offline", false];
+  else [text, ok] = [info.queued ? `Printing (${info.queued})` : "Ready", true];
+  el.querySelector(".status-text").textContent = text;
+  el.classList.toggle("ok", ok);
+  el.classList.toggle("bad", !ok);
+  el.title = `${info ? printerLabel(info) : "No printer"} · Tap to see the print queue`;
+}
+
+// Apply printer data (embedded in the page, or from a refresh).
+function applyOverview(data) {
+  overviewData = data;
+  printersInfo = data.printers || [];
+  const changed = renderPrinterSelect(data.default);
+  if (changed !== false) applyPrinterCaps();
+  renderStatus();
+}
+
+let refreshing = null;
+function refreshStatus() {
+  // One request at a time; callers during a refresh share it.
+  refreshing = refreshing || fetch("/api/printers")
+    .then((res) => res.json())
+    .then(applyOverview)
+    .catch(() => {
+      const el = document.getElementById("printer-status");
+      el.querySelector(".status-text").textContent = "Server offline";
+      el.classList.remove("ok");
+      el.classList.add("bad");
+    })
+    .finally(() => { refreshing = null; });
+  return refreshing;
 }
 
 document.addEventListener("change", (e) => {
   if (e.target.id !== "printer-select") return;
   try { localStorage.setItem(PRINTER_KEY, e.target.value); } catch (_) { /* private mode */ }
   applyPrinterCaps();
-  refreshStatus();
+  renderStatus();
 });
-
-async function refreshStatus() {
-  const el = document.getElementById("printer-status");
-  const text = el.querySelector(".status-text");
-  try {
-    const res = await fetch(`/api/status?printer=${encodeURIComponent(selectedPrinter())}`);
-    const data = await res.json();
-    el.classList.toggle("ok", !!data.ok);
-    el.classList.toggle("bad", !data.ok);
-    if (!data.printer) text.textContent = "No printer";
-    else if (data.dry_run) text.textContent = "Test mode";
-    else if (!data.ok) text.textContent = "Offline";
-    else text.textContent = data.queued_jobs ? `Printing (${data.queued_jobs})` : "Ready";
-    el.title = `${data.message || ""} · Tap to see the print queue`;
-  } catch (_) {
-    text.textContent = "Server offline";
-    el.classList.remove("ok");
-    el.classList.add("bad");
-  }
-}
 
 // Success message naming the printer the job went to.
 function sentMessage(count = 1) {
@@ -139,5 +154,13 @@ function sentMessage(count = 1) {
   return count > 1 ? `Sent ${count} documents to ${name}` : `Sent to ${name}`;
 }
 
-loadPrinters();
+// The page arrives with printer data embedded, so it shows immediately;
+// after that, refresh quietly in the background.
+let overviewData = window.BOOT || { printers: [], default: null, dry_run: false };
+applyOverview(overviewData);
+// Page scripts load after this file; tell them about the printer once they're listening.
+document.addEventListener("DOMContentLoaded", applyPrinterCaps);
 setInterval(() => document.visibilityState === "visible" && refreshStatus(), 10000);
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshStatus());
+// Pages restored from the back/forward cache carry old data.
+window.addEventListener("pageshow", (e) => e.persisted && refreshStatus());

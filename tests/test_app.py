@@ -1,5 +1,6 @@
 import glob
 import io
+import os
 import shutil
 import subprocess
 
@@ -288,10 +289,8 @@ Duplex/Duplex Printing: *None DuplexNoTumble DuplexTumble
 CNTonerSaving/Toner Save: *False True
 """
 
-LPQ = """HP_DeskJet_3835 is ready and printing
-Rank    Owner   Job     File(s)                         Total Size
-active  pi      7       Passport photos                 812345 bytes
-1st     pi      8       invoice (final).pdf             45000 bytes
+LPSTAT_JOBS = """HP_DeskJet_3835-7       pi              812345   Mon 28 Sep 2026 06:50:01 PM IST
+HP_DeskJet_3835-8       pi               45000   Mon 28 Sep 2026 06:51:12 PM IST
 """
 
 
@@ -310,11 +309,10 @@ def test_parse_lpoptions_colour_and_duplex():
     assert canon == {"duplex": True, "color": False, "mono_option": None}
 
 
-def test_parse_lpq():
-    jobs = printing.parse_lpq(LPQ, "HP_DeskJet_3835")
+def test_parse_lpstat_jobs():
+    jobs = printing.parse_lpstat_jobs(LPSTAT_JOBS + "garbage line\n")
     assert [j["id"] for j in jobs] == ["HP_DeskJet_3835-7", "HP_DeskJet_3835-8"]
-    assert jobs[0]["state"] == "printing" and jobs[0]["title"] == "Passport photos"
-    assert jobs[1]["state"] == "waiting" and jobs[1]["title"] == "invoice (final).pdf"
+    assert jobs[0]["printer"] == "HP_DeskJet_3835" and jobs[0]["size"] == 812345
 
 
 def test_build_lp_args_black_and_white():
@@ -340,18 +338,23 @@ class FakeCups:
             out = "system default destination: Canon_MF4820d"
         elif args[0] == "lpoptions":
             out = HP_OPTIONS if args[2] == "HP_DeskJet_3835" else CANON_OPTIONS
-        elif args[0] == "lpq":
-            out = LPQ if args[2] == "HP_DeskJet_3835" else "no entries"
+        elif args[:2] == ["lpstat", "-o"]:
+            out = LPSTAT_JOBS
         elif args[0] == "lp":
             out = f"request id is {args[2]}-9 (1 file(s))"
         return subprocess.CompletedProcess(args, code, out, "")
 
 
 @pytest.fixture
-def cups(monkeypatch):
+def cups(monkeypatch, tmp_path):
     fake = FakeCups()
     monkeypatch.setattr(printing, "_run", fake)
-    return fake
+    monkeypatch.setattr(printing, "PPD_DIR", tmp_path / "ppd")
+    printing.invalidate()
+    printing._caps_cache.clear()
+    yield fake
+    printing.invalidate()
+    printing._caps_cache.clear()
 
 
 @pytest.fixture
@@ -413,6 +416,8 @@ def test_queue_shows_active_and_recent(live_client, cups):
                      content_type="multipart/form-data")
     data = live_client.get("/api/queue").get_json()
     assert {j["id"] for j in data["active"]} == {"HP_DeskJet_3835-7", "HP_DeskJet_3835-8"}
+    states = {j["id"]: j["state"] for j in data["active"]}
+    assert states == {"HP_DeskJet_3835-7": "printing", "HP_DeskJet_3835-8": "waiting"}
     # The photo job went to the Canon, which has an empty queue, so it's done.
     assert data["recent"][0]["title"] == "Photos" and data["recent"][0]["state"] == "done"
 
@@ -456,3 +461,42 @@ print-scaling/Print Scaling: *auto auto-fit fill fit none
 def test_hp_deskjet_3835_capabilities():
     caps = printing.parse_lpoptions(HP_DESKJET_3835_OPTIONS)
     assert caps == {"duplex": False, "color": True, "mono_option": ("ColorModel", "Gray")}
+
+
+def test_printer_state_is_cached_between_requests(live_client, cups):
+    for _ in range(5):
+        live_client.get("/api/printers")
+        live_client.get("/api/queue")
+    # One snapshot: lpstat -l -p, -d, -o once; lpoptions once per printer.
+    assert sum(1 for c in cups.calls if c[:2] == ["lpstat", "-l"]) == 1
+    assert sum(1 for c in cups.calls if c[0] == "lpoptions") == 3
+
+
+def test_snapshot_refreshes_after_ttl_and_after_printing(live_client, cups, monkeypatch):
+    live_client.get("/api/printers")
+    monkeypatch.setattr(printing, "SNAPSHOT_TTL", 0)
+    live_client.get("/api/printers")
+    assert sum(1 for c in cups.calls if c[:2] == ["lpstat", "-l"]) == 2
+    # Capabilities are not re-read when the state refreshes.
+    assert sum(1 for c in cups.calls if c[0] == "lpoptions") == 3
+
+
+def test_capabilities_reread_when_printer_reconfigured(cups, tmp_path):
+    ppd_dir = tmp_path / "ppd"
+    ppd_dir.mkdir()
+    ppd = ppd_dir / "HP_DeskJet_3835.ppd"
+    ppd.write_text("v1")
+    printing.printer_capabilities("HP_DeskJet_3835")
+    printing.printer_capabilities("HP_DeskJet_3835")
+    assert sum(1 for c in cups.calls if c[0] == "lpoptions") == 1
+    os.utime(ppd, (1, 1))  # e.g. lpadmin rewrote the PPD
+    printing.printer_capabilities("HP_DeskJet_3835")
+    assert sum(1 for c in cups.calls if c[0] == "lpoptions") == 2
+
+
+def test_pages_embed_printer_state(live_client):
+    html = live_client.get("/document").get_data(as_text=True)
+    assert "window.BOOT = " in html and "HP_DeskJet_3835" in html
+    assert "Checking" not in html and ">Ready<" in html
+    queue_html = live_client.get("/queue").get_data(as_text=True)
+    assert "window.INITIAL_QUEUE = " in queue_html and "HP_DeskJet_3835-7" in queue_html

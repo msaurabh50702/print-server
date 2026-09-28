@@ -23,12 +23,13 @@
     <span class="brand-mark">{{ icon("print") }}</span>
     {% endif %}
     <h1>{% block heading %}Home Printer{% endblock %}</h1>
-    <a id="printer-status" class="status" href="{{ url_for('queue_page') }}" aria-label="Printer status and print queue"><i class="dot"></i><span class="status-text">Checking&hellip;</span></a>
+    <a id="printer-status" class="status {{ 'ok' if boot.status.ok else 'bad' }}" href="{{ url_for('queue_page') }}" aria-label="Printer status and print queue"><i class="dot"></i><span class="status-text">{{ boot.status.text }}</span></a>
   </header>
   <main class="container">
     {% block content %}{% endblock %}
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script>window.BOOT = {{ boot|tojson }};</script>
   <script src="{{ url_for('static', filename='js/common.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
