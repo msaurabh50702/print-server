@@ -69,12 +69,16 @@ if [[ "$PRESET" == "hp" ]] && ! dpkg -s hplip >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Connection (USB first, then network)
+# Connection
+#   1. IPP over USB (the ipp-usb service). When it's running it owns the USB
+#      port, so the plain usb:// and hp:/usb backends can't reach the printer.
+#   2. Plain USB.
+#   3. Network (Wi-Fi / Ethernet).
 # ---------------------------------------------------------------------------
 echo "==> Looking for the printer (this can take ~20 seconds)"
 DEVICES="$(sudo lpinfo -v 2>/dev/null | awk '{print $2}' | grep -iE "$URI_MATCH" || true)"
 URI=""
-for pattern in '^usb:' '^hp:/usb' '^(ipps?|dnssd):' '^hp:'; do
+for pattern in '\(USB\)\._ipp' '^usb:' '^hp:/usb' '^(ipps?|dnssd):' '^hp:'; do
   URI="$(grep -m1 -E "$pattern" <<<"$DEVICES" || true)"
   [[ -n "$URI" ]] && break
 done
@@ -93,10 +97,15 @@ echo "    found $URI"
 # Driver model (PPD)
 # ---------------------------------------------------------------------------
 echo "==> Looking for a driver"
-MODEL="${PPD:-$(lpinfo -m 2>/dev/null | grep -iE "$MODEL_MATCH" | grep -v -i 'hpijs' | head -n1 | awk '{print $1}')}"
-if [[ -z "$MODEL" && "$URI" =~ ^(ipps?|dnssd): ]]; then
-  # Network printers that support IPP Everywhere / AirPrint work without a driver.
+if [[ -n "${PPD:-}" ]]; then
+  MODEL="$PPD"
+elif [[ "$URI" =~ ^(ipps?|dnssd): ]]; then
+  # IPP printers (network or IPP over USB) work driverless (IPP Everywhere / AirPrint).
   MODEL="everywhere"
+else
+  # Classic USB: use a real driver. "driverless:" entries only work with IPP URIs.
+  MODEL="$(lpinfo -m 2>/dev/null | grep -iE "$MODEL_MATCH" | grep -v -e '^driverless:' -e 'hpijs' \
+           | head -n1 | awk '{print $1}')"
 fi
 if [[ -z "$MODEL" ]]; then
   if [[ "$PRESET" == "canon" ]]; then
