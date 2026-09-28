@@ -174,3 +174,31 @@ window.addEventListener("pageshow", (e) => e.persisted && refreshStatus());
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch(() => { /* not critical */ });
 }
+
+/* ---------- files shared from other apps (Share → Printer) ---------- */
+
+// Items from /share for this page (?share=<id>), or [] when there are none.
+// The parameter is removed so a reload doesn't add the files again.
+async function takeSharedItems() {
+  const params = new URLSearchParams(location.search);
+  const id = params.get("share");
+  if (!id) return [];
+  params.delete("share");
+  history.replaceState(null, "", location.pathname + (params.toString() ? `?${params}` : ""));
+  try {
+    const res = await fetch(`/api/shares/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error();
+    return (await res.json()).items;
+  } catch (_) {
+    toast("The shared files have expired. Please share them again.", "error");
+    return [];
+  }
+}
+
+// A shared image as a File, ready for the crop editor.
+async function sharedImageFile(item) {
+  const res = await fetch(`/api/documents/${item.id}/original`);
+  if (!res.ok) throw new Error("Could not load the shared photo");
+  const blob = await res.blob();
+  return new File([blob], item.name, { type: blob.type });
+}

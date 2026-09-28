@@ -187,4 +187,21 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   });
+  // Photos shared from another app: pick the smallest layout that fits them all.
+  takeSharedItems().then(async (items) => {
+    const images = items.filter((item) => item.image).slice(0, 16);
+    if (!images.length) return;
+    const sizes = Object.keys(layouts).map(Number).sort((a, b) => a - b);
+    await chooseLayout(String(sizes.find((n) => n >= images.length) || sizes[sizes.length - 1]));
+    try {
+      for (let i = 0; i < images.length; i++) {
+        const file = await sharedImageFile(images[i]);
+        const result = await renderEdit(file, { rotation: 0, crop: null, locked: true }, aspect());
+        setCell(i, { file, ...result });
+      }
+      toast("Tap a photo to crop or rotate it");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
 })();

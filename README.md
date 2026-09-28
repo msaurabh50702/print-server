@@ -119,6 +119,10 @@ and installing the certificate once, opening the `https` address and tapping **I
 - `./scripts/enable-https.sh --disable` goes back to plain http on port 80.
 - iPhone: Safari → Share → **Add to Home Screen** already opens full screen without the certificate.
 
+**Share to Printer (Android):** once installed, *Printer* appears in the Share menu of other apps
+(Gallery, WhatsApp, Files, Gmail…). Shared documents open in *Print documents*; shared photos offer
+*Photo page*, *Passport photos*, *ID card copy* (first photo = front, second = back) or *Print as documents*.
+
 ## Configuration
 
 Edit `/etc/default/print-server`, then run `sudo systemctl restart print-server`.

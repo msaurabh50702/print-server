@@ -97,4 +97,28 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   });
+  // Photos shared from another app: crop the front, then the back.
+  takeSharedItems().then(async (items) => {
+    const images = items.filter((item) => item.image).slice(0, 2);
+    if (!images.length) return;
+    let files;
+    try {
+      files = await Promise.all(images.map(sharedImageFile));
+    } catch (err) {
+      toast(err.message, "error");
+      return;
+    }
+    const cropSide = (index) => {
+      const side = index === 0 ? "front" : "back";
+      editor.open({
+        file: files[index], state: null, isNew: true, aspect,
+        onDone: (result) => {
+          setSide(side, result);
+          if (index + 1 < files.length) cropSide(index + 1);
+        },
+        onReplace: () => pickFile(side),
+      });
+    };
+    cropSide(0);
+  });
 })();

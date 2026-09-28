@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Print shared files{% endblock %}
+{% block heading %}Shared to printer{% endblock %}
+{% block content %}
+<section class="fade-in">
+  {% if items %}
+  <div class="shared-strip" aria-label="Shared files">
+    {% for item in items[:12] %}
+    <figure class="shared-thumb">
+      {% if item.image %}
+      <img src="{{ url_for('document_original', job_id=item.id) }}" alt="">
+      {% else %}
+      <span class="shared-doc">{{ icon("doc") }}</span>
+      {% endif %}
+      <figcaption>{{ item.name }}</figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  <p class="hint">{{ items|length }} file{{ "" if items|length == 1 else "s" }} received{% if failed %} · {{ failed }} couldn't be read{% endif %}. How do you want to print {{ "it" if items|length == 1 else "them" }}?</p>
+
+  <nav class="choices shared-choices">
+    {% if all_images %}
+    <a class="choice" href="{{ url_for('photos_page', share=share_id) }}">
+      <span class="choice-icon photos">{{ icon("photo") }}</span>
+      <span class="choice-text"><strong>Photo page</strong>
+        <span>Arrange {{ "the photo" if images|length == 1 else "the photos" }} on one A4 page, then crop and rotate.</span></span>
+      <span class="chev">{{ icon("back") }}</span>
+    </a>
+    {% if images|length == 1 %}
+    <a class="choice" href="{{ url_for('passport_page', share=share_id) }}">
+      <span class="choice-icon passport">{{ icon("person") }}</span>
+      <span class="choice-text"><strong>Passport photos</strong>
+        <span>Crop to passport size and fill a page.</span></span>
+      <span class="chev">{{ icon("back") }}</span>
+    </a>
+    {% endif %}
+    {% if images|length <= 2 %}
+    <a class="choice" href="{{ url_for('id_card_page', share=share_id) }}">
+      <span class="choice-icon idcard">{{ icon("id-card") }}</span>
+      <span class="choice-text"><strong>ID card copy</strong>
+        <span>{{ "Front of the card" if images|length == 1 else "First photo is the front, second the back" }}, at real size.</span></span>
+      <span class="chev">{{ icon("back") }}</span>
+    </a>
+    {% endif %}
+    {% endif %}
+    <a class="choice" href="{{ url_for('document_page', share=share_id) }}">
+      <span class="choice-icon docs">{{ icon("doc") }}</span>
+      <span class="choice-text"><strong>Print as {{ "a document" if items|length == 1 else "documents" }}</strong>
+        <span>One page per image or file, fitted to A4, with preview.</span></span>
+      <span class="chev">{{ icon("back") }}</span>
+    </a>
+  </nav>
+  {% else %}
+  <div class="card install-card">
+    <span class="empty-icon warn">!</span>
+    <div>
+      <strong>Nothing to print</strong>
+      <span class="hint">{% if failed %}The shared file{{ "" if failed == 1 else "s" }} couldn't be read. Try sharing a photo or a PDF.{% else %}Share a photo or a file (not a link or text) to print it.{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

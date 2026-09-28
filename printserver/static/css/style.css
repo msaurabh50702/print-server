@@ -610,3 +610,20 @@ a.status:hover { border-color: var(--accent); }
 .offline { display: grid; justify-items: center; gap: 12px; text-align: center; padding-top: 18vh; }
 .offline img { border-radius: 18px; }
 code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }
+
+/* ==========================================================================
+   Shared files
+   ========================================================================== */
+.shared-strip { display: flex; gap: 10px; overflow-x: auto; padding: 16px 0 8px; scrollbar-width: none; }
+.shared-strip::-webkit-scrollbar { display: none; }
+.shared-thumb { flex: none; width: 92px; margin: 0; }
+.shared-thumb img, .shared-doc {
+  display: grid; place-items: center; width: 92px; height: 92px; border-radius: 14px;
+  object-fit: cover; background: var(--surface-2); box-shadow: var(--shadow-sm); color: var(--muted);
+}
+.shared-doc .icon { width: 36px; height: 36px; }
+.shared-thumb figcaption {
+  margin-top: 4px; font-size: .72rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.shared-choices { margin-top: 14px; }

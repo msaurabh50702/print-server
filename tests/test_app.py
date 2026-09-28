@@ -542,3 +542,72 @@ def test_install_page_and_ca_download(client, app, tmp_path):
     resp = client.get("/ca.crt")
     assert resp.status_code == 200 and resp.headers["Content-Type"] == "application/x-x509-ca-cert"
     assert resp.data.startswith(b"-----BEGIN CERTIFICATE-----")
+
+
+# ---------------------------------------------------------------------------
+# Share to Printer
+# ---------------------------------------------------------------------------
+
+def pdf_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (100, 140), "white").save(buf, "PDF")
+    buf.seek(0)
+    return buf
+
+
+def test_manifest_registers_share_target(client):
+    target = json.loads(client.get("/manifest.webmanifest").data)["share_target"]
+    assert target["action"] == "/share" and target["method"] == "POST"
+    assert target["enctype"] == "multipart/form-data"
+    accept = target["params"]["files"][0]["accept"]
+    assert "image/*" in accept and "application/pdf" in accept
+
+
+def test_share_documents_go_straight_to_document_page(client):
+    resp = client.post("/share", data={"files": [(pdf_bytes(), "bill.pdf"), (pdf_bytes(), "form.pdf")]},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 303 and "/document?share=" in resp.headers["Location"]
+    share_id = resp.headers["Location"].split("share=")[1]
+    items = client.get(f"/api/shares/{share_id}").get_json()["items"]
+    assert [i["name"] for i in items] == ["bill.pdf", "form.pdf"]
+    assert not any(i["image"] for i in items)
+
+
+def test_share_photos_offer_choices(client):
+    resp = client.post("/share", data={"files": [(jpeg(), "IMG_1.jpg"), (jpeg("blue"), "IMG_2.jpg")]},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 303 and "/shared/" in resp.headers["Location"]
+    page = client.get(resp.headers["Location"]).get_data(as_text=True)
+    assert "Photo page" in page and "ID card copy" in page
+    assert "Passport photos" not in page  # only offered for a single photo
+    share_id = resp.headers["Location"].rsplit("/", 1)[1].split("?")[0]
+    item = client.get(f"/api/shares/{share_id}").get_json()["items"][0]
+    original = client.get(f"/api/documents/{item['id']}/original")
+    assert original.status_code == 200 and original.data[:2] == b"\xff\xd8"  # the JPEG itself
+
+
+def test_share_file_without_extension_uses_mime_type(client):
+    data = {"files": [(jpeg(), "shared image", "image/jpeg")]}
+    resp = client.post("/share", data=data, content_type="multipart/form-data")
+    share_id = resp.headers["Location"].rsplit("/", 1)[1].split("?")[0]
+    items = client.get(f"/api/shares/{share_id}").get_json()["items"]
+    assert len(items) == 1 and items[0]["image"]
+
+
+def test_share_unsupported_or_empty(client):
+    resp = client.post("/share", data={"files": [(io.BytesIO(b"x"), "app.apk")]},
+                       content_type="multipart/form-data")
+    page = client.get(resp.headers["Location"]).get_data(as_text=True)
+    assert "couldn&#39;t be read" in page or "couldn't be read" in page
+    resp = client.post("/share", data={"text": "hello"}, content_type="multipart/form-data")
+    assert "Nothing to print" in client.get(resp.headers["Location"]).get_data(as_text=True)
+
+
+def test_share_ids_are_validated(client):
+    assert client.get("/api/shares/../../etc").status_code == 404
+    assert client.get("/shared/" + "0" * 32).status_code == 404
+    doc = upload_image_doc(client)
+    pdf_doc = client.post("/api/documents", data={"file": (pdf_bytes(), "a.pdf")},
+                          content_type="multipart/form-data").get_json()["id"]
+    assert client.get(f"/api/documents/{doc}/original").status_code == 200
+    assert client.get(f"/api/documents/{pdf_doc}/original").status_code == 404

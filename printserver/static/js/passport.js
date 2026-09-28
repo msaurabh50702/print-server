@@ -140,4 +140,14 @@
 
   slot.style.setProperty("--ar", aspect());
   renderSheet();
+  // A photo shared from another app opens straight in the crop editor.
+  takeSharedItems().then(async (items) => {
+    const image = items.find((item) => item.image);
+    if (!image) return;
+    try {
+      openEditor(await sharedImageFile(image), null, true);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
 })();

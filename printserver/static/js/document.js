@@ -193,6 +193,12 @@
 
   /* ---------- print ---------- */
 
+  // Files shared from another app arrive already uploaded.
+  takeSharedItems().then((items) => {
+    items.forEach(addDoc);
+    if (items.length) render();
+  });
+
   printBtn.addEventListener("click", async () => {
     if (!docs.length || uploading) return;
     setBusy(printBtn, true);

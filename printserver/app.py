@@ -1,12 +1,14 @@
 """Flask web app: photo sheets and document printing over the home network."""
+import json
+import mimetypes
 import re
 import shutil
 import time
 import uuid
 from pathlib import Path
 
-from flask import (Flask, abort, jsonify, make_response, render_template, request, send_file,
-                   send_from_directory)
+from flask import (Flask, abort, jsonify, make_response, redirect, render_template, request,
+                   send_file, send_from_directory, url_for)
 from werkzeug.utils import secure_filename
 
 from . import documents, photos, printing
@@ -313,15 +315,17 @@ def create_app(config=None):
         copies = int_arg(request.form.get("copies"), 1, 1, 99)
         return jsonify(job=submit(pdf_path, target, "Passport photos", copies=copies))
 
-    @app.post("/api/documents")
-    def upload_document():
-        file = request.files.get("file")
-        if not file or not file.filename:
-            raise printing.PrintError("Choose a file to upload")
-        name = secure_filename(file.filename) or "upload"
-        ext = Path(name).suffix.lower()
+    def store_upload(file):
+        """Save an uploaded file and convert it to PDF. Returns {id, name, pages, image}."""
+        display_name = (file.filename or "").strip()[:200]
+        ext = Path(secure_filename(display_name)).suffix.lower()
         if ext not in documents.ALLOWED_EXTS:
-            raise documents.ConversionError(f"Unsupported file type '{ext or name}'")
+            # Files shared from other apps sometimes arrive without an extension.
+            guessed = mimetypes.guess_extension(file.mimetype or "") or ""
+            ext = {".jpe": ".jpg", ".jpeg": ".jpg"}.get(guessed, guessed)
+        if ext not in documents.ALLOWED_EXTS:
+            raise documents.ConversionError(f"Unsupported file type '{ext or display_name or file.mimetype}'")
+        display_name = display_name or f"Shared file{ext}"
         job_id, path = new_job_dir()
         source = path / f"source{ext}"
         file.save(source)
@@ -330,8 +334,73 @@ def create_app(config=None):
         except Exception:
             shutil.rmtree(path, ignore_errors=True)
             raise
-        (path / "name.txt").write_text(file.filename[:200])
-        return jsonify(id=job_id, name=file.filename, pages=documents.page_count(pdf))
+        (path / "name.txt").write_text(display_name)
+        return {"id": job_id, "name": display_name, "pages": documents.page_count(pdf),
+                "image": ext in documents.IMAGE_EXTS}
+
+    @app.post("/api/documents")
+    def upload_document():
+        file = request.files.get("file")
+        if not file or not file.filename:
+            raise printing.PrintError("Choose a file to upload")
+        return jsonify(store_upload(file))
+
+    @app.get("/api/documents/<job_id>/original")
+    def document_original(job_id):
+        """The uploaded image itself (for the photo, passport and ID card editors)."""
+        path = job_dir(job_id)
+        for source in path.glob("source.*"):
+            if source.suffix.lower() in documents.IMAGE_EXTS:
+                return send_file(source, max_age=3600)
+        abort(404)
+
+    # ---------- Share to Printer (Android share sheet) ----------
+
+    shares_dir = data_dir / "shares"
+    shares_dir.mkdir(exist_ok=True)
+    SHARE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+    def load_share(share_id):
+        if not SHARE_ID_RE.match(share_id):
+            abort(404)
+        path = shares_dir / f"{share_id}.json"
+        if not path.exists():
+            abort(404)
+        items = json.loads(path.read_text())
+        # Drop files that have since been cleaned up.
+        return [i for i in items if (jobs_dir / i["id"] / "document.pdf").exists()]
+
+    @app.post("/share")
+    def share_target():
+        """Files shared from other apps arrive here (see share_target in the manifest)."""
+        cutoff = time.time() - app.config["JOB_TTL_SECONDS"]
+        for old in shares_dir.glob("*.json"):
+            if old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+        items, failed = [], []
+        for file in request.files.getlist("files")[:MAX_BATCH]:
+            try:
+                items.append(store_upload(file))
+            except (documents.ConversionError, printing.PrintError, OSError) as exc:
+                failed.append(f"{file.filename or 'file'}: {exc}")
+        share_id = uuid.uuid4().hex
+        (shares_dir / f"{share_id}.json").write_text(json.dumps(items))
+        if items and not any(i["image"] for i in items) and not failed:
+            return redirect(url_for("document_page", share=share_id), code=303)
+        return redirect(url_for("shared_page", share_id=share_id,
+                                failed=len(failed) or None), code=303)
+
+    @app.get("/shared/<share_id>")
+    def shared_page(share_id):
+        items = load_share(share_id)
+        images = [i for i in items if i["image"]]
+        return render_template("shared.html", share_id=share_id, items=items,
+                               images=images, all_images=len(images) == len(items),
+                               failed=request.args.get("failed", type=int) or 0)
+
+    @app.get("/api/shares/<share_id>")
+    def share_items(share_id):
+        return jsonify(items=load_share(share_id))
 
     @app.get("/api/documents/<job_id>/page/<int:page>.png")
     def document_page_png(job_id, page):
