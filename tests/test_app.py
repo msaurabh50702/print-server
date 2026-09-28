@@ -439,3 +439,20 @@ def test_dry_run_printers_and_queue(client):
     recent = client.get("/api/queue").get_json()["recent"]
     assert recent[0]["printer"] == "Test_Colour_Inkjet"
     assert client.get("/queue").status_code == 200
+
+
+# Real `lpoptions -l` output from an HP DeskJet 3835 (driverless / IPP Everywhere).
+HP_DESKJET_3835_OPTIONS = """PageSize/Media Size: 100x150mm 100x150mm.Borderless 4x6 *A4 A4.Borderless A5 Letter Custom.WIDTHxHEIGHT
+MediaType/Media Type: *Stationery PhotographicGlossy Com.hp.specialtyGlossy Com.hp.specialtyMatte
+ColorModel/Print Color Mode: *RGB Gray DeviceGray DeviceRGB AdobeRGB
+OutputBin/Output Tray: *FaceUp
+cupsPrintQuality/Print Quality: Draft *Normal High
+print-content-optimize/Print Optimization: *auto photo graphics text text-and-graphics
+print-rendering-intent/Print Rendering Intent: *auto perceptual
+print-scaling/Print Scaling: *auto auto-fit fill fit none
+"""
+
+
+def test_hp_deskjet_3835_capabilities():
+    caps = printing.parse_lpoptions(HP_DESKJET_3835_OPTIONS)
+    assert caps == {"duplex": False, "color": True, "mono_option": ("ColorModel", "Gray")}
