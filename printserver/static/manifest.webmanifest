@@ -1,13 +1,23 @@
 {
+  "id": "/",
   "name": "Home Printer",
   "short_name": "Printer",
+  "description": "Print photos, passport photos, ID cards and documents on the home printers.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#f5f6fb",
   "theme_color": "#4f46e5",
   "icons": [
-    { "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Print documents", "url": "/document", "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Print photos", "url": "/photos", "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Print queue", "url": "/queue", "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

@@ -5,7 +5,8 @@ import time
 import uuid
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import (Flask, abort, jsonify, make_response, render_template, request, send_file,
+                   send_from_directory)
 from werkzeug.utils import secure_filename
 
 from . import documents, photos, printing
@@ -141,6 +142,43 @@ def create_app(config=None):
         sheet = {"margin_mm": app.config["PAGE_MARGIN_MM"], "gap_mm": app.config["CELL_GAP_MM"],
                  "page_w_mm": photos.A4_MM[0], "page_h_mm": photos.A4_MM[1]}
         return render_template("passport.html", sizes=sizes, counts=photos.PASSPORT_COUNTS, sheet=sheet)
+
+    # ---------- installable app (PWA) ----------
+
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        response = send_from_directory(app.static_folder, "manifest.webmanifest",
+                                       mimetype="application/manifest+json")
+        response.cache_control.max_age = 3600
+        return response
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Served from the root so it controls the whole app; never cached so
+        # updates to it are picked up straight away.
+        response = send_from_directory(app.static_folder, "sw.js", mimetype="text/javascript")
+        response.cache_control.no_cache = True
+        return response
+
+    @app.get("/offline")
+    def offline_page():
+        return render_template("offline.html")
+
+    @app.get("/install")
+    def install_page():
+        return render_template("install.html", has_ca=Path(app.config["CA_CERT_PATH"]).is_file(),
+                               host=request.host.split(":")[0])
+
+    @app.get("/ca.crt")
+    def ca_certificate():
+        path = Path(app.config["CA_CERT_PATH"])
+        if not path.is_file():
+            abort(404)
+        response = make_response(path.read_bytes())
+        # This type makes Android and iOS offer to install the certificate.
+        response.headers["Content-Type"] = "application/x-x509-ca-cert"
+        response.headers["Content-Disposition"] = 'attachment; filename="home-printer-ca.crt"'
+        return response
 
     @app.get("/queue")
     def queue_page():

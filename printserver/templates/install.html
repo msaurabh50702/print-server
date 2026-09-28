@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Install app{% endblock %}
+{% block heading %}Install app{% endblock %}
+{% block content %}
+<section class="fade-in install">
+
+  <div id="st-installed" class="card install-card" hidden>
+    <span class="empty-icon">{{ icon("check") }}</span>
+    <div><strong>Installed</strong><span class="hint">You're using the Home Printer app.</span></div>
+  </div>
+
+  <div id="st-ready" class="card install-card" hidden>
+    <img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="" width="56" height="56">
+    <div>
+      <strong>Home Printer</strong>
+      <span class="hint">Opens full screen from your home screen, like a normal app.</span>
+    </div>
+    <button id="install-btn" class="btn primary small" type="button">Install</button>
+  </div>
+
+  <div id="st-menu" class="card install-card" hidden>
+    <img src="{{ url_for('static', filename='icons/icon-192.png') }}" alt="" width="56" height="56">
+    <div>
+      <strong>Install from the browser menu</strong>
+      <span class="hint">In Chrome tap <b>⋮</b> → <b>Install app</b> (or <b>Add to Home screen</b> → <b>Install</b>).</span>
+    </div>
+  </div>
+
+  <div id="st-https" hidden>
+    <p class="lead-text">Chrome only installs apps from secure (<b>https</b>) sites. This page was opened over
+      plain <b>http</b>, so it can only add a shortcut. Do this once on each phone:</p>
+
+    {% if has_ca %}
+    <ol class="steps-list">
+      <li class="card">
+        <strong>Download the printer's certificate</strong>
+        <span class="hint">It lets this phone trust the printer server at <b>https://{{ host }}</b>.</span>
+        <a class="btn primary small" href="{{ url_for('ca_certificate') }}">{{ icon("download") }}<span>Download certificate</span></a>
+      </li>
+      <li class="card">
+        <strong>Install it</strong>
+        <details open>
+          <summary>Android</summary>
+          <p class="hint">Settings → <b>Security &amp; privacy</b> → <b>More security settings</b> →
+            <b>Encryption &amp; credentials</b> → <b>Install a certificate</b> → <b>CA certificate</b> →
+            <b>Install anyway</b> → pick <b>home-printer-ca.crt</b> from Downloads.
+            (Menu names differ slightly between phones; search Settings for "CA certificate".)</p>
+        </details>
+        <details>
+          <summary>iPhone / iPad</summary>
+          <p class="hint">Open the download in Safari and allow the profile. Then Settings → <b>General</b> →
+            <b>VPN &amp; Device Management</b> → install the profile. Finally Settings → General → About →
+            <b>Certificate Trust Settings</b> → turn it on.</p>
+        </details>
+      </li>
+      <li class="card">
+        <strong>Open the secure version and install</strong>
+        <span class="hint">Then tap <b>Install</b> on that page.</span>
+        <a class="btn primary small" href="https://{{ host }}/install">{{ icon("open") }}<span>Open https://{{ host }}</span></a>
+      </li>
+    </ol>
+    {% else %}
+    <div class="card install-card">
+      <span class="empty-icon warn">!</span>
+      <div>
+        <strong>Secure mode isn't set up yet</strong>
+        <span class="hint">On the Raspberry Pi, run <code>./scripts/enable-https.sh</code> once, then come back to this page.</span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <h2 class="section-title queue-title">Quick alternatives</h2>
+  <ul class="alt-list">
+    <li><b>iPhone:</b> in Safari tap Share → <b>Add to Home Screen</b>. It opens full screen and needs no certificate.</li>
+    <li><b>Android:</b> Chrome ⋮ → <b>Add to Home screen</b> → <b>Create shortcut</b>. This adds an icon that opens in Chrome.</li>
+  </ul>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/install.js') }}"></script>
+{% endblock %}

@@ -500,3 +500,45 @@ def test_pages_embed_printer_state(live_client):
     assert "Checking" not in html and ">Ready<" in html
     queue_html = live_client.get("/queue").get_data(as_text=True)
     assert "window.INITIAL_QUEUE = " in queue_html and "HP_DeskJet_3835-7" in queue_html
+
+
+# ---------------------------------------------------------------------------
+# Installable app (PWA)
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+
+
+def test_manifest_is_installable(client):
+    resp = client.get("/manifest.webmanifest")
+    assert resp.status_code == 200 and resp.mimetype == "application/manifest+json"
+    manifest = json.loads(resp.data)
+    assert manifest["display"] == "standalone" and manifest["start_url"] == "/"
+    sizes = {i["sizes"] for i in manifest["icons"] if i["type"] == "image/png"}
+    assert {"192x192", "512x512"} <= sizes
+    assert any(i.get("purpose") == "maskable" for i in manifest["icons"])
+    for icon in manifest["icons"]:
+        assert client.get(icon["src"]).status_code == 200
+    assert 'href="/manifest.webmanifest"' in client.get("/").get_data(as_text=True)
+
+
+def test_service_worker_served_from_root_uncached(client):
+    resp = client.get("/sw.js")
+    assert resp.status_code == 200 and "javascript" in resp.mimetype
+    assert "no-cache" in resp.headers["Cache-Control"]
+    assert client.get("/offline").status_code == 200
+
+
+def test_install_page_and_ca_download(client, app, tmp_path):
+    app.config["CA_CERT_PATH"] = tmp_path / "missing.crt"
+    page = client.get("/install", base_url="http://printer.local").get_data(as_text=True)
+    assert "enable-https.sh" in page and "/ca.crt" not in page
+    assert client.get("/ca.crt").status_code == 404
+
+    ca = tmp_path / "ca.crt"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n")
+    app.config["CA_CERT_PATH"] = ca
+    page = client.get("/install", base_url="http://printer.local").get_data(as_text=True)
+    assert 'href="/ca.crt"' in page and 'href="https://printer.local/install"' in page
+    resp = client.get("/ca.crt")
+    assert resp.status_code == 200 and resp.headers["Content-Type"] == "application/x-x509-ca-cert"
+    assert resp.data.startswith(b"-----BEGIN CERTIFICATE-----")

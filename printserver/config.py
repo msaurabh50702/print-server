@@ -24,6 +24,10 @@ class Config:
     # Uploaded files and generated PDFs older than this are deleted.
     JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
 
+    # Root certificate of the Pi's own HTTPS certificate authority (created by
+    # scripts/enable-https.sh). Phones install it once to trust https://<pi>.local.
+    CA_CERT_PATH = Path(os.environ.get("CA_CERT_PATH", "/etc/print-server/ca.crt"))
+
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_UPLOAD_MB", "100")) * 1024 * 1024
 
     # Page geometry used for photo sheets (millimetres).

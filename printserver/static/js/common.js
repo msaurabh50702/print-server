@@ -46,9 +46,14 @@ function storedPrinter() {
   try { return localStorage.getItem(PRINTER_KEY) || ""; } catch (_) { return ""; }
 }
 
+// Printer in the dropdown; on pages without one, the phone's saved choice,
+// falling back to the server's default printer.
 function selectedPrinter() {
   const select = document.getElementById("printer-select");
-  return select && select.value ? select.value : storedPrinter();
+  if (select && select.value) return select.value;
+  const saved = storedPrinter();
+  if (printersInfo.some((p) => p.name === saved)) return saved;
+  return (typeof overviewData !== "undefined" && overviewData.default) || saved;
 }
 
 const selectedPrinterInfo = () => printersInfo.find((p) => p.name === selectedPrinter());
@@ -164,3 +169,8 @@ setInterval(() => document.visibilityState === "visible" && refreshStatus(), 100
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshStatus());
 // Pages restored from the back/forward cache carry old data.
 window.addEventListener("pageshow", (e) => e.persisted && refreshStatus());
+
+// Service worker: makes the app installable (browsers only allow this on HTTPS).
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => { /* not critical */ });
+}

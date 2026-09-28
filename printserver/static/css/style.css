@@ -585,3 +585,28 @@ a.status:hover { border-color: var(--accent); }
   display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
   background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok);
 }
+
+/* ==========================================================================
+   Install app
+   ========================================================================== */
+.install { padding-top: 8px; }
+.install-card { display: flex; align-items: center; gap: 14px; padding: 16px; margin-top: 12px; }
+.install-card > div { flex: 1; display: grid; gap: 2px; }
+.install-card img { border-radius: 14px; flex: none; }
+.empty-icon.warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); font-weight: 800; }
+.lead-text { margin: 12px 0 14px; }
+.steps-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: st; }
+.steps-list li { display: grid; gap: 8px; padding: 16px 16px 16px 56px; position: relative; counter-increment: st; }
+.steps-list li::before {
+  content: counter(st); position: absolute; left: 16px; top: 16px; display: grid; place-items: center;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--grad); color: #fff; font-weight: 700; font-size: .85rem;
+}
+.steps-list .btn { justify-self: start; }
+.steps-list details { border-top: 1px solid var(--border); padding-top: 8px; }
+.steps-list summary { cursor: pointer; font-weight: 600; }
+.steps-list details p { margin: 6px 0 0; }
+.alt-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--muted); font-size: .92rem; }
+.footnote a { color: var(--accent); font-weight: 600; }
+.offline { display: grid; justify-items: center; gap: 12px; text-align: center; padding-top: 18vh; }
+.offline img { border-radius: 18px; }
+code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); }

@@ -101,6 +101,24 @@ On any device on the same Wi-Fi, open **http://raspberrypi.local**
 To get a friendlier address, rename the Pi with
 `sudo raspi-config` → System → Hostname, for example to `printer`, which gives `http://printer.local`.
 
+### Install it as an app (HTTPS)
+
+Chrome only offers **Install app** for secure (`https`) sites; over `http://printer.local` it can
+only add a shortcut. To make it installable, run once on the Pi:
+
+```bash
+./scripts/enable-https.sh
+```
+
+This installs [Caddy](https://caddyserver.com), which creates the Pi's own certificate authority and
+serves `https://<hostname>.local` (and the Pi's IP address) in front of the app. Plain `http://` keeps
+working. Then on each phone open `http://<hostname>.local/install`: it walks you through downloading
+and installing the certificate once, opening the `https` address and tapping **Install**.
+
+- Run the script again if the Pi's IP address changes (or reserve the IP in your router).
+- `./scripts/enable-https.sh --disable` goes back to plain http on port 80.
+- iPhone: Safari → Share → **Add to Home Screen** already opens full screen without the certificate.
+
 ## Configuration
 
 Edit `/etc/default/print-server`, then run `sudo systemctl restart print-server`.
@@ -111,6 +129,7 @@ Edit `/etc/default/print-server`, then run `sudo systemctl restart print-server`
 | `PRINTER_NAME` | *(CUPS default)* | CUPS queue to print to |
 | `DRY_RUN` | `0` | `1` saves PDFs to `DATA_DIR/dry-run` instead of printing |
 | `DATA_DIR` | `/var/tmp/print-server` | Temporary uploads (deleted after 1 hour) |
+| `CA_CERT_PATH` | `/etc/print-server/ca.crt` | Certificate offered at `/ca.crt` (set by `enable-https.sh`) |
 | `MAX_UPLOAD_MB` | `100` | Upload size limit |
 | `PAGE_MARGIN_MM` / `CELL_GAP_MM` | `5` / `3` | Photo sheet margin and gap between photos |
 
