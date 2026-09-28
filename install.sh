@@ -1,17 +1,81 @@
 #!/usr/bin/env bash
-# Install the print server on Raspberry Pi OS (Bookworm or newer).
-# Usage:  ./install.sh            (installs everything incl. LibreOffice for Word/Excel files)
-#         ./install.sh --no-office (skip LibreOffice; PDFs and images still work)
+# Install the print server on 64-bit Raspberry Pi OS (Bookworm or newer).
+# Usage:  ./install.sh               installs everything incl. LibreOffice for Word/Excel files
+#         ./install.sh --no-office   skip LibreOffice (PDFs and images still work)
+#         ./install.sh --skip-checks install even if the system checks fail
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_USER="${SUDO_USER:-$USER}"
+RUN_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 WITH_OFFICE=1
-[[ "${1:-}" == "--no-office" ]] && WITH_OFFICE=0
+SKIP_CHECKS=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-office) WITH_OFFICE=0 ;;
+    --skip-checks) SKIP_CHECKS=1 ;;
+    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 if [[ $EUID -eq 0 && -z "${SUDO_USER:-}" ]]; then
   echo "Run this as your normal user (it uses sudo where needed)." >&2
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# System checks: catch an unusable setup before installing anything.
+# ---------------------------------------------------------------------------
+echo "==> Checking this system"
+PROBLEMS=()
+
+ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+case "$ARCH" in
+  arm64|amd64) ;;
+  armhf|armel|i386)
+    PROBLEMS+=("This is a 32-bit system ($ARCH). Canon's printer driver needs 64-bit.
+     Reinstall with 'Raspberry Pi OS Lite (64-bit)' using Raspberry Pi Imager
+     (needs a Pi 3, 4, 5 or Zero 2 W).") ;;
+esac
+
+OS_RELEASE_FILE="${OS_RELEASE_FILE:-/etc/os-release}"
+if [[ -r "$OS_RELEASE_FILE" ]]; then
+  . "$OS_RELEASE_FILE"
+  MAJOR="${VERSION_ID%%.*}"
+  if [[ "${ID:-}" =~ ^(debian|raspbian)$ && -n "$MAJOR" && "$MAJOR" -lt 12 ]]; then
+    PROBLEMS+=("${PRETTY_NAME:-This OS} is too old and no longer receives packages.
+     Install Raspberry Pi OS (64-bit), Bookworm or newer.")
+  elif [[ "${ID:-}" == "ubuntu" && -n "$MAJOR" && "$MAJOR" -lt 22 ]]; then
+    PROBLEMS+=("${PRETTY_NAME:-This OS} is too old. Use Ubuntu 22.04 or newer.")
+  fi
+fi
+
+if [[ "$(date +%Y)" -lt 2025 ]]; then
+  PROBLEMS+=("The clock is wrong ($(date)). Package downloads will fail.
+     Connect to the internet and run:  sudo timedatectl set-ntp true
+     or set it by hand:                sudo date -s \"2026-01-31 10:00\"")
+fi
+
+APT_SOURCES="${APT_SOURCES:-/etc/apt/sources.list /etc/apt/sources.list.d/}"
+# shellcheck disable=SC2086
+if grep -rqsE '^[^#]*debian/? +(sid|unstable)' $APT_SOURCES; then
+  echo "    Warning: a Debian 'sid' (unstable) repository is enabled. It can break" >&2
+  echo "    Raspberry Pi OS; consider removing it from /etc/apt/sources.list*." >&2
+fi
+
+if command -v python3 >/dev/null && ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
+  PROBLEMS+=("Python $(python3 -V 2>&1 | cut -d' ' -f2) is too old; 3.9 or newer is needed.")
+fi
+
+if [[ ${#PROBLEMS[@]} -gt 0 ]]; then
+  echo >&2
+  echo "This system can't run the print server yet:" >&2
+  for p in "${PROBLEMS[@]}"; do echo "  - $p" >&2; done
+  echo >&2
+  if [[ $SKIP_CHECKS -eq 0 ]]; then
+    echo "Fix the above, or re-run with --skip-checks to try anyway." >&2
+    exit 1
+  fi
+  echo "Continuing because of --skip-checks." >&2
 fi
 
 echo "==> Installing system packages"

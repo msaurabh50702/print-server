@@ -35,12 +35,19 @@ are needed on the phone or laptop.
 - Canon **UFR II / UFRII LT Printer Driver for Linux** (V5.x or newer), downloaded from
   Canon's support site (search "MF4820d" → Drivers & Downloads → Linux).
 
+### Preparing the SD card
+
+Use **Raspberry Pi Imager** and pick **Raspberry Pi OS Lite (64-bit)**. Under *Edit settings*, set the
+hostname (e.g. `printer`), your user, Wi-Fi, time zone, and enable SSH. Older 32-bit "Raspbian"
+installs (Buster and earlier) won't work: their package servers are gone and Canon's driver is 64-bit only.
+`install.sh` checks for this (and for a wrong clock) before installing anything.
+
 ## Install
 
 ```bash
 git clone https://github.com/msaurabh50702/print-server.git
 cd print-server
-./install.sh                 # add --no-office to skip LibreOffice (PDF/images still work)
+./install.sh                 # --no-office skips LibreOffice (PDF/images still work)
 ```
 
 `install.sh` installs CUPS, poppler-utils, LibreOffice (for Office files) and Avahi. It
