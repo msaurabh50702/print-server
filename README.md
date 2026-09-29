@@ -50,16 +50,62 @@ are needed on the phone or laptop.
 - Canon **UFR II / UFRII LT Printer Driver for Linux** (V5.x or newer), downloaded from
   Canon's support site (search "MF4820d" → Drivers & Downloads → Linux).
 
-### Preparing the SD card
+### Setting up the Pi from a fresh SD card
 
-Use **Raspberry Pi Imager** and pick **Raspberry Pi OS Lite (64-bit)**. Under *Edit settings*, set the
-hostname (e.g. `printer`), your user, Wi-Fi, time zone, and enable SSH. Older 32-bit "Raspbian"
-installs (Buster and earlier) won't work: their package servers are gone and Canon's driver is 64-bit only.
-`install.sh` checks for this (and for a wrong clock) before installing anything.
+These steps set up a Pi with no monitor, keyboard or mouse: everything is done over SSH from
+another computer (the commands below are for a Mac; Linux is the same).
+
+1. **Write the SD card.** In **Raspberry Pi Imager** choose *Device* → your Pi, *Operating System* →
+   Raspberry Pi OS (other) → **Raspberry Pi OS Lite (64-bit)**, and your SD card. Under
+   *Next → Edit settings*:
+   - *General*: hostname `printer`, a username (e.g. `pi`) and password, your Wi-Fi name and
+     password with the right Wi-Fi country, and your time zone. A Pi 3 only sees **2.4 GHz** Wi-Fi.
+   - *Services*: **Enable SSH** with password authentication.
+
+   Older 32-bit "Raspbian" installs (Buster and earlier) won't work: their package servers are gone
+   and Canon's driver is 64-bit only. `install.sh` checks for this (and for a wrong clock) before
+   installing anything.
+2. **First start.** Put the card in the Pi (remove any USB drive it used to start from), power it on,
+   and **wait about 5 minutes without unplugging it**: the first start resizes the card, applies your
+   settings and restarts. Pulling the power during this can damage the card. Then connect:
+   ```bash
+   ssh-keygen -R printer.local      # forget the old fingerprint if this name was used before
+   ssh pi@printer.local
+   ```
+   - *"Connection refused"*: the Pi is on the network but SSH isn't running yet. Wait a few more
+     minutes. If it persists, put the card back in the computer, run `touch /Volumes/bootfs/ssh`,
+     and start the Pi again.
+   - *"cannot resolve printer.local"*: the Pi isn't on the network (usually a wrong Wi-Fi name or
+     password). Connect it to the router with a network cable and try again. To find its address,
+     run `arp -a | grep -i -E "b8:27:eb|printer"` on the Mac (`b8:27:eb` is used by every Pi 3) and
+     `ssh pi@<that address>`.
+3. **Fix Wi-Fi if needed** (only when you had to use a cable). On the Pi:
+   ```bash
+   sudo raspi-config nonint do_wifi_country IN     # your two-letter country code
+   sudo rfkill unblock wifi
+   nmcli dev wifi list                             # your network must be listed
+   nmcli -t -f NAME,TYPE con show                  # delete old Wi-Fi entries with a wrong password:
+   sudo nmcli con delete "<name>"
+   sudo nmcli --ask dev wifi connect "<Wi-Fi name>"   # type the password when asked
+   hostname -I                                     # shows one address per connection
+   ```
+   `--ask` avoids problems with characters like `!` or `$` in the password.
+4. **Install the print server** (see [Install](#install)), **add the printers**
+   (see [Add the printer](#add-the-printer)) and **turn on HTTPS**
+   (see [Install it as an app](#install-it-as-an-app-https)).
+5. **Unplug the network cable** (if you used one), run `sudo reboot`, and check that
+   `http://printer.local` opens on your phone over Wi-Fi.
+6. **On each phone** (again, if you are re-installing): a fresh install creates a **new** HTTPS
+   certificate, so remove the old app and the old *Caddy Local Authority* certificate
+   (Android: Settings → search "User credentials"), then install the new certificate from
+   `http://printer.local/install` and install the app again from `https://printer.local`.
+
+Shut the Pi down with `sudo poweroff` before unplugging it, so the SD card isn't damaged.
 
 ## Install
 
 ```bash
+sudo apt update && sudo apt install -y git
 git clone https://github.com/msaurabh50702/print-server.git
 cd print-server
 ./install.sh                 # --no-office skips LibreOffice (PDF/images still work)
@@ -70,10 +116,16 @@ then creates a Python virtualenv and starts the `print-server` systemd service o
 
 ### Add the printer
 
-Copy Canon's ARM64 driver `.deb` to the Pi, then run:
+Copy Canon's ARM64 driver `.deb` to the Pi (from the computer you downloaded it to):
 
 ```bash
-./scripts/setup-printer.sh ~/cnrdrvcups-ufr2-uk_*_arm64.deb
+scp ~/Downloads/linux-UFRII-drv-*/ARM64/Debian/cnrdrvcups-ufr2-uk_*_arm64.deb pi@printer.local:~
+```
+
+Connect the printer by USB, switch it on, and run on the Pi:
+
+```bash
+./scripts/setup-printer.sh canon ~/cnrdrvcups-ufr2-uk_*_arm64.deb
 ```
 
 The script installs the driver, finds the printer on USB, creates a CUPS queue called
@@ -172,9 +224,16 @@ pytest
 - `printserver/printing.py` sends jobs to CUPS with `lp`
   (`-o media=A4`, copies, page ranges, `sides=two-sided-long-edge` for duplex).
 
+## Updating
+
+```bash
+cd ~/print-server && git pull && sudo systemctl restart print-server
+```
+
 ## Troubleshooting
 
 - **The status pill says "No printer"**: run `scripts/setup-printer.sh`, or set `PRINTER_NAME`.
+- **The status pill says "Switched off"**: the USB printer is turned off or unplugged. Jobs sent now wait in the queue and print once it is back on.
 - **The status pill says "Offline"**: check the printer is on and the USB cable is connected, then run `cupsenable Canon_MF4820d`.
 - **Word/Excel files fail**: install LibreOffice: `sudo apt install libreoffice-writer libreoffice-calc libreoffice-impress`.
 - **`.local` address doesn't open** (some Android phones): use the Pi's IP address instead, and consider a DHCP reservation on your router.
