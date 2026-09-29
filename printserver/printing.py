@@ -9,6 +9,7 @@ import copy
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import threading
@@ -147,13 +148,31 @@ def usb_devices(root=None):
     return devices
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _port_open(host, port, timeout=0.3):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def usb_connected(uri, devices):
     """True/False if the printer behind `uri` is plugged in and on; None if we can't tell."""
-    if not uri or devices is None:
+    if not uri:
+        return None
+    parsed = urllib.parse.urlsplit(uri)
+    if parsed.scheme in ("ipp", "ipps", "http", "https") and parsed.hostname in LOCAL_HOSTS:
+        # ipp-usb serves each IPP-over-USB printer on a local port (60000+) only
+        # while the printer is connected and switched on.
+        port = parsed.port or 631
+        return None if port == 631 else _port_open(parsed.hostname, port)
+    if devices is None:
         return None
     text = urllib.parse.unquote(uri)
     if uri.startswith("usb://"):
-        parsed = urllib.parse.urlsplit(uri)
         serial = urllib.parse.parse_qs(parsed.query).get("serial", [""])[0]
         if serial:
             return any(d["serial"] == serial for d in devices)

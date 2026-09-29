@@ -874,6 +874,15 @@ def test_usb_connected(tmp_path):
     assert printing.usb_devices(tmp_path / "missing") is None
 
 
+def test_usb_connected_ipp_usb_port(monkeypatch):
+    opened = []
+    monkeypatch.setattr(printing, "_port_open", lambda host, port: opened.append(port) or port == 60000)
+    assert printing.usb_connected("ipp://localhost:60000/ipp/print", None) is True
+    assert printing.usb_connected("ipp://127.0.0.1:60001/ipp/print", []) is False
+    assert printing.usb_connected("ipp://localhost:631/printers/x", []) is None
+    assert opened == [60000, 60001]
+
+
 def test_parse_lpstat_devices():
     text = ("device for Canon_MF4820d: usb://Canon/MF4800%20Series?serial=ABC999\n"
             "device for HP_DeskJet_3835: ipp://HP%20DeskJet%203830%20series%20(USB)._ipp._tcp.local/\n")
