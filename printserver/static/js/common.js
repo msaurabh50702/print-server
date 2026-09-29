@@ -245,3 +245,13 @@ async function sharedImageFile(item) {
   const blob = await res.blob();
   return new File([blob], item.name, { type: blob.type });
 }
+
+/* ---------- photo fit preview (Whole photo / Fill box) ---------- */
+
+// Previews show the whole photo or a filled box, matching what will print.
+function syncPhotoFit() {
+  const chosen = document.querySelector('input[name="fit"]:checked');
+  document.body.classList.toggle("fit-whole", !!chosen && chosen.value === "fit");
+}
+document.addEventListener("change", (e) => e.target.name === "fit" && syncPhotoFit());
+document.addEventListener("DOMContentLoaded", syncPhotoFit);

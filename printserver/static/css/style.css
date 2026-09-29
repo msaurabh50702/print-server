@@ -714,3 +714,7 @@ code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--
 .cert-setup > summary strong::after { content: " ▸"; color: var(--muted); }
 .cert-setup[open] > summary strong::after { content: " ▾"; }
 .cert-setup[open] > summary { margin-bottom: 12px; }
+
+/* Whole photo: previews show the full photo with white borders, like the print. */
+.fit-whole .id-slot.filled img, .fit-whole .pp-slot.filled img, .fit-whole .pp-tile img,
+.fit-whole .sheet .cell img { object-fit: contain; background: #fff; }

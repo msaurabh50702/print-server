@@ -57,6 +57,7 @@
       if (sides[side]) form.append(side, sides[side].blob, `${side}.jpg`);
     }
     form.append("outline", radioValue("outline"));
+    form.append("fit", radioValue("fit"));
     form.append("copies", document.getElementById("copies").value || "1");
     appendPrintTarget(form);
     return form;

@@ -97,6 +97,7 @@
     form.append("size", radioValue("size"));
     form.append("count", radioValue("count"));
     form.append("outline", radioValue("outline"));
+    form.append("fit", radioValue("fit"));
     form.append("copies", document.getElementById("copies").value || "1");
     appendPrintTarget(form);
     return form;

@@ -115,6 +115,10 @@ def create_app(config=None):
         history.add(job, target["printer"], title, copies)
         return job
 
+    def photo_fit(form):
+        """"fill" (trim edges to fill the box) or "fit" (whole photo, the default)."""
+        return "fill" if form.get("fit") == "fill" else "fit"
+
     def int_arg(value, default, low, high):
         try:
             return max(low, min(int(value), high))
@@ -244,7 +248,7 @@ def create_app(config=None):
                 images[int(match.group(1))] = file.stream
         if not images:
             raise printing.PrintError("Add at least one photo first")
-        fit = "fit" if request.form.get("fit") == "fit" else "fill"
+        fit = photo_fit(request.form)
         try:
             page = photos.compose_sheet(
                 layout, images, app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"],
@@ -278,7 +282,7 @@ def create_app(config=None):
         try:
             page = photos.compose_id_card(
                 front.stream if front else None, back.stream if back else None,
-                app.config["PHOTO_DPI"], outline)
+                app.config["PHOTO_DPI"], outline, photo_fit(request.form))
         except (ValueError, OSError) as exc:
             raise printing.PrintError(f"Could not read photo: {exc}")
         _, path = new_job_dir()
@@ -311,7 +315,7 @@ def create_app(config=None):
         try:
             page, _ = photos.compose_passport(
                 photo.stream, size, count, app.config["PAGE_MARGIN_MM"], app.config["CELL_GAP_MM"],
-                app.config["PHOTO_DPI"], outline)
+                app.config["PHOTO_DPI"], outline, photo_fit(request.form))
         except (ValueError, OSError) as exc:
             raise printing.PrintError(f"Could not read photo: {exc}")
         _, path = new_job_dir()

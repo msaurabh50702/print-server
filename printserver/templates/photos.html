@@ -36,13 +36,7 @@
 
   <div class="card options">
     {% include "_print_target.html" %}
-    <div class="option">
-      <span class="option-label">Photo fit</span>
-      <div class="segmented" role="radiogroup" aria-label="Photo fit">
-        <label><input type="radio" name="fit" value="fill" checked><span>Fill box</span></label>
-        <label><input type="radio" name="fit" value="fit"><span>Whole photo</span></label>
-      </div>
-    </div>
+    {% include "_photo_fit.html" %}
     <div class="option">
       <span class="option-label">Copies</span>
       <div class="stepper">

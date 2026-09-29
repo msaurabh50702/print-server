@@ -40,7 +40,7 @@ def _mm_to_px(mm, dpi):
     return int(round(mm / MM_PER_INCH * dpi))
 
 
-def compose_sheet(layout_id, images, margin_mm, gap_mm, dpi=300, fit="fill"):
+def compose_sheet(layout_id, images, margin_mm, gap_mm, dpi=300, fit="fit"):
     """Compose photos onto an A4 page.
 
     images: dict {cell_index: file-like or path}. Missing cells stay blank.
@@ -77,12 +77,21 @@ def save_pdf(page, path, dpi=300):
 ID_CARD_MM = (125.6, 94.0)
 
 
-def compose_id_card(front, back=None, dpi=300, outline=True):
+def _sized(img, w, h, fit):
+    """Resize for a w x h box: "fill" crops to cover it, "fit" keeps the whole
+    photo (white borders). Returns (image, x_offset, y_offset) inside the box."""
+    if fit == "fit":
+        img = ImageOps.contain(img, (w, h), Image.LANCZOS)
+        return img, (w - img.width) // 2, (h - img.height) // 2
+    return ImageOps.fit(img, (w, h), Image.LANCZOS), 0, 0
+
+
+def compose_id_card(front, back=None, dpi=300, outline=True, fit="fit"):
     """Place an ID card's front and back at ID_CARD_MM size on an A4 page.
 
     front/back: file-like or path, already cropped to the card. The front is
     centred in the top half of the page and the back in the bottom half, like
-    a photocopier's ID-copy mode.
+    a photocopier's ID-copy mode. fit: "fit" (whole photo) or "fill".
     """
     page = Image.new("RGB", (_mm_to_px(A4_MM[0], dpi), _mm_to_px(A4_MM[1], dpi)), "white")
     card_w, card_h = _mm_to_px(ID_CARD_MM[0], dpi), _mm_to_px(ID_CARD_MM[1], dpi)
@@ -93,9 +102,9 @@ def compose_id_card(front, back=None, dpi=300, outline=True):
             continue
         with Image.open(source) as img:
             img = ImageOps.exif_transpose(img).convert("RGB")
-            img = ImageOps.fit(img, (card_w, card_h), Image.LANCZOS)
+            img, dx, dy = _sized(img, card_w, card_h, fit)
         y = top + (half - card_h) // 2
-        page.paste(img, (x, y))
+        page.paste(img, (x + dx, y + dy))
         if outline:
             # Thin grey cutting guide just outside the card.
             pad = max(1, dpi // 150)
@@ -131,10 +140,11 @@ def passport_sizes_for_client(margin_mm, gap_mm):
     return result
 
 
-def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline=True):
+def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline=True, fit="fit"):
     """Tile one photo at real passport size from the top-left of an A4 page.
 
     count: number of photos, or None for a full page.
+    fit: "fit" (whole photo) or "fill".
     """
     if size_id not in PASSPORT_SIZES:
         raise ValueError(f"Unknown passport size '{size_id}'")
@@ -146,7 +156,7 @@ def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline
     photo_w, photo_h = _mm_to_px(w_mm, dpi), _mm_to_px(h_mm, dpi)
     with Image.open(source) as img:
         img = ImageOps.exif_transpose(img).convert("RGB")
-        img = ImageOps.fit(img, (photo_w, photo_h), Image.LANCZOS)
+        img, dx, dy = _sized(img, photo_w, photo_h, fit)
 
     draw = ImageDraw.Draw(page)
     pad = max(1, dpi // 150)
@@ -154,7 +164,7 @@ def compose_passport(source, size_id, count, margin_mm, gap_mm, dpi=300, outline
         col, row = i % cols, i // cols
         x = _mm_to_px(margin_mm + col * (w_mm + gap_mm), dpi)
         y = _mm_to_px(margin_mm + row * (h_mm + gap_mm), dpi)
-        page.paste(img, (x, y))
+        page.paste(img, (x + dx, y + dy))
         if outline:
             draw.rectangle([x - pad, y - pad, x + photo_w + pad - 1, y + photo_h + pad - 1],
                            outline=(170, 170, 170), width=pad)

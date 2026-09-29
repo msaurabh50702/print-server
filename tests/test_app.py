@@ -45,7 +45,7 @@ def test_status_dry_run(client):
 def test_compose_every_layout(layout):
     cols, rows, _ = LAYOUTS[layout]
     images = {i: jpeg() for i in range(cols * rows)}
-    page = compose_sheet(layout, images, 5, 3, dpi=100)
+    page = compose_sheet(layout, images, 5, 3, dpi=100, fit="fill")
     assert page.size == (827, 1169)  # A4 at 100 dpi
     # Top-left cell is filled, page margin stays white.
     assert page.getpixel((40, 40))[0] > 200 and page.getpixel((40, 40))[1] < 60
@@ -137,7 +137,7 @@ def test_parse_page_ranges():
 
 def test_id_card_real_size_layout():
     dpi = 100
-    page = compose_id_card(jpeg("red", (856, 540)), jpeg("blue", (856, 540)), dpi=dpi, outline=False)
+    page = compose_id_card(jpeg("red", (856, 540)), jpeg("blue", (856, 540)), dpi=dpi, outline=False, fit="fill")
     assert page.size == (827, 1169)
     card_w = round(ID_CARD_MM[0] / 25.4 * dpi)
     card_h = round(ID_CARD_MM[1] / 25.4 * dpi)
@@ -183,7 +183,8 @@ def test_passport_real_size_and_count(size_id):
     w_mm, h_mm = PASSPORT_SIZES[size_id][:2]
     cols, rows = passport_grid(size_id, 5, 3)
     assert cols >= 3 and rows >= 4
-    page, total = compose_passport(jpeg("red", (350, 450)), size_id, None, 5, 3, dpi=dpi, outline=False)
+    page, total = compose_passport(jpeg("red", (350, 450)), size_id, None, 5, 3, dpi=dpi, outline=False,
+                                   fit="fill")
     assert total == cols * rows
     # First photo starts at the top-left margin, exactly the requested size.
     margin_px = round(5 / 25.4 * dpi)
@@ -809,3 +810,36 @@ def test_free_size_print_and_pdf(client, app):
     assert missing.status_code == 400
     assert client.post("/api/free-size/print", data={"items": "not json"}).status_code == 400
     assert client.get("/free-size").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Photo fit: Whole photo (default) vs Fill box
+# ---------------------------------------------------------------------------
+
+def test_id_card_whole_photo_vs_fill():
+    dpi = 50
+    tall = lambda: jpeg("red", (200, 400))  # noqa: E731  (much taller than the card box)
+    card_w = round(ID_CARD_MM[0] / 25.4 * dpi)
+    x0 = (round(210 / 25.4 * dpi) - card_w) // 2
+    half = round(297 / 25.4 * dpi) // 2
+    y_mid = (half - round(ID_CARD_MM[1] / 25.4 * dpi)) // 2 + round(ID_CARD_MM[1] / 25.4 * dpi) // 2
+    whole = compose_id_card(tall(), None, dpi=dpi, outline=False)           # default = whole photo
+    assert whole.getpixel((x0 + 3, y_mid)) == (255, 255, 255)               # white border at the side
+    assert whole.getpixel((x0 + card_w // 2, y_mid))[0] > 200               # photo in the middle
+    fill = compose_id_card(tall(), None, dpi=dpi, outline=False, fit="fill")
+    assert fill.getpixel((x0 + 3, y_mid))[0] > 200                          # box filled edge to edge
+
+
+def test_passport_whole_photo_vs_fill():
+    wide = lambda: jpeg("red", (800, 200))  # noqa: E731
+    whole, _ = compose_passport(wide(), "35x45", 1, 5, 3, dpi=100)
+    fill, _ = compose_passport(wide(), "35x45", 1, 5, 3, dpi=100, fit="fill")
+    top_inside = (round(5 / 25.4 * 100) + 10, round(5 / 25.4 * 100) + 3)
+    assert whole.getpixel(top_inside) == (255, 255, 255)
+    assert fill.getpixel(top_inside)[0] > 200
+
+
+def test_photo_pages_default_to_whole_photo(client):
+    for url in ("/photos", "/id-card", "/passport"):
+        html = client.get(url).get_data(as_text=True)
+        assert 'value="fit" checked><span>Whole photo' in html, url
