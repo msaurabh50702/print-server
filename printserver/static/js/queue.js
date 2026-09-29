@@ -148,6 +148,33 @@
     if (!printers.length) panel.innerHTML = '<p class="hint">No printers set up yet.</p>';
   }
 
+  /* ---------- restart / shut down the Pi ---------- */
+  const POWER = {
+    restart: {
+      ask: "Restart the print server? Printing will be unavailable for about a minute.",
+      done: "Restarting… the app will be back in about a minute.",
+    },
+    shutdown: {
+      ask: "Shut down the print server? You'll need to unplug and plug in its power to turn it on again.",
+      done: "Shutting down. Unplug the power once the green light stops flashing (about 20 seconds).",
+    },
+  };
+  for (const button of document.querySelectorAll("[data-power]")) {
+    button.addEventListener("click", async () => {
+      const action = POWER[button.dataset.power];
+      if (!confirm(action.ask)) return;
+      setBusy(button, true);
+      try {
+        const res = await fetch(`/api/system/${button.dataset.power}`, { method: "POST" });
+        if (!res.ok) throw new Error(await readError(res));
+        toast(action.done, "success");
+      } catch (err) {
+        toast(err.message, "error");
+        setBusy(button, false);
+      }
+    });
+  }
+
   renderPrinters(overviewData);
   document.addEventListener("overview", (e) => renderPrinters(e.detail));
 

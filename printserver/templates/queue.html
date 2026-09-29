@@ -19,6 +19,15 @@
   <h2 class="section-title queue-title">Recent</h2>
   <ul id="recent-list" class="job-list"></ul>
   <p id="recent-empty" class="hint" hidden>No jobs sent from this app yet.</p>
+
+  <h2 class="section-title queue-title">Print server</h2>
+  <div class="card power-card">
+    <p class="hint">Restart the Raspberry Pi if printing gets stuck. Shut it down before unplugging its power.</p>
+    <div class="power-actions">
+      <button class="btn ghost small" type="button" data-power="restart">{{ icon("reset") }}<span>Restart</span></button>
+      <button class="btn ghost small danger" type="button" data-power="shutdown">{{ icon("power") }}<span>Shut down</span></button>
+    </div>
+  </div>
 </section>
 
 <template id="job-item">

@@ -895,3 +895,33 @@ def test_switched_off_status():
     printer = {"ok": True, "queued": 0, "alerts": [], "connected": False}
     assert printing.status_label(printer) == ("Switched off", False)
     assert printing.status_label(dict(printer, connected=None)) == ("Ready", True)
+
+
+def test_power_buttons(client, app, monkeypatch):
+    from printserver import system
+    assert b'data-power="shutdown"' in client.get("/queue").data
+    assert client.post("/api/system/explode").status_code == 404
+    # Test mode never touches the real machine.
+    res = client.post("/api/system/restart")
+    assert res.status_code == 400 and "Test mode" in res.get_json()["error"]
+
+    app.config["DRY_RUN"] = False
+    started = []
+
+    class FakeTimer:
+        def __init__(self, delay, func, args):
+            self.args = args
+        def start(self):
+            started.append(self.args[0])
+
+    monkeypatch.setattr(system.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(system, "_allowed", lambda verb: False)
+    res = client.post("/api/system/shutdown")
+    assert res.status_code == 400 and "install.sh" in res.get_json()["error"]
+    assert started == []
+
+    monkeypatch.setattr(system, "_allowed", lambda verb: True)
+    assert client.post("/api/system/shutdown").get_json() == {"ok": True}
+    assert client.post("/api/system/restart").get_json() == {"ok": True}
+    assert started == [["sudo", "-n", "/usr/bin/systemctl", "poweroff"],
+                       ["sudo", "-n", "/usr/bin/systemctl", "reboot"]]

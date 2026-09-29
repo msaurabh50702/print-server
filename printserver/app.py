@@ -11,7 +11,7 @@ from flask import (Flask, abort, jsonify, make_response, redirect, render_templa
                    send_file, send_from_directory, url_for)
 from werkzeug.utils import secure_filename
 
-from . import documents, photos, printing
+from . import documents, photos, printing, system
 from .history import JobHistory
 from .config import Config
 
@@ -235,6 +235,13 @@ def create_app(config=None):
             raise printing.PrintError("Test mode: jobs are saved as PDFs, nothing to cancel")
         printing.cancel_job(job_id)
         history.mark_cancelled(job_id)
+        return jsonify(ok=True)
+
+    @app.post("/api/system/<action>")
+    def system_power(action):
+        if action not in system.POWER_ACTIONS:
+            abort(404)
+        system.power(action, app.config["DRY_RUN"])
         return jsonify(ok=True)
 
     def compose_photo_request():

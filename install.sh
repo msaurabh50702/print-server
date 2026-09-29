@@ -88,6 +88,16 @@ echo "==> Allowing $RUN_USER to manage printers"
 sudo usermod -aG lpadmin "$RUN_USER"
 sudo systemctl enable --now cups avahi-daemon
 
+echo "==> Allowing the web app to restart and shut down the Pi"
+SUDOERS_TMP="$(mktemp)"
+echo "$RUN_USER ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff" > "$SUDOERS_TMP"
+if sudo visudo -cf "$SUDOERS_TMP" >/dev/null; then
+  sudo install -m 440 "$SUDOERS_TMP" /etc/sudoers.d/print-server
+else
+  echo "    (skipped: sudoers rule failed validation)"
+fi
+rm -f "$SUDOERS_TMP"
+
 echo "==> Creating Python virtualenv"
 python3 -m venv "$DIR/.venv"
 "$DIR/.venv/bin/pip" install --upgrade pip

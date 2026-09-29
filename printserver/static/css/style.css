@@ -633,6 +633,11 @@ code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--
 .status.warn { color: var(--warn); }
 
 /* Printers panel on the queue page */
+.power-card { display: grid; gap: 12px; padding: 16px; }
+.power-card .hint { margin: 0; }
+.power-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.power-actions .btn { flex: 1; min-width: 130px; }
+.btn.danger { color: var(--danger); }
 .printer-panel { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 .printer-card { padding: 14px 16px; display: grid; gap: 10px; }
 .printer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

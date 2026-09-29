@@ -100,7 +100,8 @@ another computer (the commands below are for a Mac; Linux is the same).
    (Android: Settings → search "User credentials"), then install the new certificate from
    `http://printer.local/install` and install the app again from `https://printer.local`.
 
-Shut the Pi down with `sudo poweroff` before unplugging it, so the SD card isn't damaged.
+Shut the Pi down before unplugging it, so the SD card isn't damaged: use **Print queue → Shut down**
+in the app (see [Restart or shut down the Pi](#restart-or-shut-down-the-pi)) or `sudo poweroff`.
 
 ## Install
 
@@ -184,6 +185,21 @@ and installing the certificate once, opening the `https` address and tapping **I
 **Share to Printer (Android):** once installed, *Printer* appears in the Share menu of other apps
 (Gallery, WhatsApp, Files, Gmail…). Shared documents open in *Print documents*; shared photos offer
 *Photo page*, *Passport photos*, *ID card copy* (first photo = front, second = back) or *Print as documents*.
+
+### Restart or shut down the Pi
+
+The Pi has no power button, so the app has one: open **Print queue** and scroll to **Print server**.
+
+- **Restart**: useful if printing gets stuck. The app is back in about a minute.
+- **Shut down**: do this before unplugging the Pi. Wait until the green light stops flashing
+  (about 20 seconds), then unplug. To turn it on again, plug the power back in.
+
+`install.sh` allows the app to run exactly these two commands (`/etc/sudoers.d/print-server`). On a Pi
+set up before this was added, run `./install.sh` again.
+
+**Optional physical button:** connect a push button between pins **5** and **6** of the GPIO header
+(GPIO 3 and ground), add `dtoverlay=gpio-shutdown` to `/boot/firmware/config.txt` and reboot. Pressing
+it then shuts the Pi down, and pressing it again while shut down turns it back on.
 
 ## Configuration
 
