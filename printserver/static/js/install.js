@@ -8,6 +8,9 @@
   };
 
   const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  // Certificate steps: open by default until the page is on https.
+  const certSetup = document.getElementById("cert-setup");
+  if (certSetup && !window.isSecureContext) certSetup.open = true;
   let deferredPrompt = null;
 
   if (standalone) show("st-installed");

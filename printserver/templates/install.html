@@ -28,9 +28,26 @@
 
   <div id="st-https" hidden>
     <p class="lead-text">Chrome only installs apps from secure (<b>https</b>) sites. This page was opened over
-      plain <b>http</b>, so it can only add a shortcut. Do this once on each phone:</p>
+      plain <b>http</b>, so it can only add a shortcut. Set up the secure connection below, once on each phone.</p>
+    {% if not has_ca %}
+    <div class="card install-card">
+      <span class="empty-icon warn">!</span>
+      <div>
+        <strong>Secure mode isn't set up yet</strong>
+        <span class="hint">On the Raspberry Pi, run <code>./scripts/enable-https.sh</code> once, then come back to this page.</span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
 
-    {% if has_ca %}
+  {% if has_ca %}
+  {#- Always available: a phone may reach this page over https (e.g. after
+      "Proceed anyway") without trusting the certificate yet. -#}
+  <details id="cert-setup" class="cert-setup">
+    <summary>
+      <strong>Secure connection setup</strong>
+      <span class="hint">Once per phone. Needed for "Install app" and if Chrome says "Not secure".</span>
+    </summary>
     <ol class="steps-list">
       <li class="card">
         <strong>Download the printer's certificate</strong>
@@ -55,20 +72,12 @@
       </li>
       <li class="card">
         <strong>Open the secure version and install</strong>
-        <span class="hint">Then tap <b>Install</b> on that page.</span>
+        <span class="hint">Close and reopen Chrome first, then tap <b>Install</b> on that page.</span>
         <a class="btn primary small" href="https://{{ host }}/install">{{ icon("open") }}<span>Open https://{{ host }}</span></a>
       </li>
     </ol>
-    {% else %}
-    <div class="card install-card">
-      <span class="empty-icon warn">!</span>
-      <div>
-        <strong>Secure mode isn't set up yet</strong>
-        <span class="hint">On the Raspberry Pi, run <code>./scripts/enable-https.sh</code> once, then come back to this page.</span>
-      </div>
-    </div>
-    {% endif %}
-  </div>
+  </details>
+  {% endif %}
 
   <h2 class="section-title queue-title">Quick alternatives</h2>
   <ul class="alt-list">

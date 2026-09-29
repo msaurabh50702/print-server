@@ -705,3 +705,12 @@ code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--
 .tool-btn.danger { color: var(--danger); }
 .choice-icon.free { background: linear-gradient(135deg, #14b8a6, #6366f1); }
 .chip { white-space: nowrap; }
+.cert-setup { margin-top: 18px; }
+.cert-setup > summary {
+  display: grid; gap: 2px; padding: 14px 16px; cursor: pointer; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.cert-setup > summary::-webkit-details-marker { display: none; }
+.cert-setup > summary strong::after { content: " ▸"; color: var(--muted); }
+.cert-setup[open] > summary strong::after { content: " ▾"; }
+.cert-setup[open] > summary { margin-bottom: 12px; }
