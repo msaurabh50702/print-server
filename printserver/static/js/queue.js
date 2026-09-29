@@ -119,7 +119,8 @@
       const alert = printerAlert(p);
       let state = p.ok ? (p.queued ? `Printing (${p.queued})` : "Ready") : "Offline";
       let cls = p.ok ? "ok" : "bad";
-      if (alert && alert.severity === "error") [state, cls] = [alert.text, "bad"];
+      if (p.ok && p.connected === false) [state, cls] = ["Switched off", "bad"];
+      else if (alert && alert.severity === "error") [state, cls] = [alert.text, "bad"];
       card.innerHTML = `
         <div class="printer-head">
           <strong></strong>

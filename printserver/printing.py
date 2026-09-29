@@ -13,6 +13,7 @@ import struct
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -24,6 +25,7 @@ CUPS_JOB_ID_RE = re.compile(r"^([A-Za-z0-9_.\-]{1,127})-(\d{1,9})$")
 SNAPSHOT_TTL = 2.0        # seconds printer/job state is reused between requests
 CAPS_TTL = 600.0          # fallback lifetime of capabilities when the PPD can't be stat'ed
 PPD_DIR = Path("/etc/cups/ppd")
+USB_SYSFS = Path("/sys/bus/usb/devices")
 
 # Printers shown in dry-run mode, so the UI can be tried without CUPS.
 DRY_RUN_PRINTERS = [
@@ -104,6 +106,70 @@ def parse_lpstat_jobs(text):
         jobs.append({"id": job_id, "printer": id_match.group(1), "owner": owner,
                      "size": int(size), "title": "", "state": "waiting"})
     return jobs
+
+
+def parse_lpstat_devices(text):
+    """Parse `lpstat -v` into {printer name: device URI}."""
+    devices = {}
+    for line in text.splitlines():
+        match = re.match(r"^device for (\S+):\s*(\S+)", line)
+        if match:
+            devices[match.group(1)] = match.group(2)
+    return devices
+
+
+# ---------------------------------------------------------------------------
+# USB presence
+# ---------------------------------------------------------------------------
+# CUPS reports a USB printer as idle even when it is switched off; it only
+# notices once a job fails to go through. The kernel's list of USB devices
+# tells straight away whether the printer is actually there.
+
+def _norm(text):
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def usb_devices(root=None):
+    """[{manufacturer, product, serial}] of connected USB devices, or None if unknown."""
+    root = Path(root or USB_SYSFS)
+    if not root.is_dir():
+        return None
+    devices = []
+    for dev in root.iterdir():
+        info = {}
+        for key in ("manufacturer", "product", "serial"):
+            try:
+                info[key] = (dev / key).read_text().strip()
+            except OSError:
+                info[key] = ""
+        if info["product"]:
+            devices.append(info)
+    return devices
+
+
+def usb_connected(uri, devices):
+    """True/False if the printer behind `uri` is plugged in and on; None if we can't tell."""
+    if not uri or devices is None:
+        return None
+    text = urllib.parse.unquote(uri)
+    if uri.startswith("usb://"):
+        parsed = urllib.parse.urlsplit(uri)
+        serial = urllib.parse.parse_qs(parsed.query).get("serial", [""])[0]
+        if serial:
+            return any(d["serial"] == serial for d in devices)
+        name = _norm(urllib.parse.unquote(parsed.netloc + parsed.path))
+    elif "(USB)" in text:
+        # IPP-over-USB (ipp-usb): ipp://HP%20DeskJet%203830%20series%20(USB)._ipp._tcp.local/
+        name = _norm(text.split("://", 1)[-1].split("(USB)", 1)[0])
+    else:
+        return None                      # network printer: CUPS' own state is all we have
+    if not name:
+        return None
+    for d in devices:
+        for key in (_norm(d["manufacturer"] + d["product"]), _norm(d["product"])):
+            if len(key) >= 4 and (key in name or name in key):
+                return True
+    return False
 
 
 # Friendly names for common driver choices; anything else is prettified.
@@ -349,6 +415,8 @@ def _read_cups():
     default = re.search(r"system default destination:\s*(\S+)", _run(["lpstat", "-d"]).stdout)
     default = default.group(1) if default else None
     jobs = parse_lpstat_jobs(_run(["lpstat", "-o"]).stdout) if printers else []
+    uris = parse_lpstat_devices(_run(["lpstat", "-v"]).stdout) if printers else {}
+    usb = usb_devices()
 
     positions = {}
     printing = {p["printing_job"] for p in printers if p["printing_job"]}
@@ -365,6 +433,7 @@ def _read_cups():
         printer.update(is_default=printer["name"] == default, duplex=caps["duplex"],
                        color=caps["color"], paper=caps["paper"], quality=caps["quality"],
                        supplies=supplies, alerts=alerts,
+                       connected=usb_connected(uris.get(printer["name"]), usb),
                        queued=sum(1 for j in jobs if j["printer"] == printer["name"]))
         del printer["printing_job"]
     return {"printers": printers, "default": default, "jobs": jobs}
@@ -434,6 +503,8 @@ def status_label(printer, dry_run=False):
     alerts = printer.get("alerts") or []
     if not printer["ok"]:
         return "Offline", False
+    if printer.get("connected") is False:
+        return "Switched off", False
     if alerts and alerts[0]["severity"] == "error":
         return alerts[0]["text"], False
     if printer["queued"]:

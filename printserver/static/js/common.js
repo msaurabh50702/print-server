@@ -123,6 +123,7 @@ function renderPrinterSelect(defaultName) {
     let label = printerLabel(p);
     const alert = printerAlert(p);
     if (p.state === "disabled") label += " (offline)";
+    else if (p.connected === false) label += " (switched off)";
     else if (alert && alert.severity === "error") label += ` (${alert.text.toLowerCase()})`;
     else if (p.is_default && printersInfo.length > 1) label += " · default";
     return [p.name, label];
@@ -149,6 +150,7 @@ function renderStatus() {
   if (!info) [text, state] = ["No printer", "bad"];
   else if (overviewData.dry_run) [text, state] = ["Test mode", "ok"];
   else if (!info.ok) [text, state] = ["Offline", "bad"];
+  else if (info.connected === false) [text, state] = ["Switched off", "bad"];
   else if (alert && alert.severity === "error") [text, state] = [alert.text, "bad"];
   else if (info.queued) [text, state] = [`Printing (${info.queued})`, "ok"];
   else if (alert) [text, state] = [alert.text, "warn"];

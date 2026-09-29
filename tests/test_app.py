@@ -362,6 +362,7 @@ def cups(monkeypatch, tmp_path):
     monkeypatch.setattr(printing, "ipp_printer_attributes",
                         lambda name: HP_IPP if name == "HP_DeskJet_3835" else {})
     monkeypatch.setattr(printing, "PPD_DIR", tmp_path / "ppd")
+    monkeypatch.setattr(printing, "USB_SYSFS", tmp_path / "no-usb")
     printing.invalidate()
     printing._caps_cache.clear()
     yield fake
@@ -843,3 +844,45 @@ def test_photo_pages_default_to_whole_photo(client):
     for url in ("/photos", "/id-card", "/passport"):
         html = client.get(url).get_data(as_text=True)
         assert 'value="fit" checked><span>Whole photo' in html, url
+
+
+def _usb(root, name, **files):
+    dev = root / name
+    dev.mkdir(parents=True)
+    for key, value in files.items():
+        (dev / key).write_text(value + "\n")
+
+
+def test_usb_connected(tmp_path):
+    _usb(tmp_path, "1-1.2", manufacturer="HP", product="DeskJet 3830 series", serial="CN12345")
+    _usb(tmp_path, "1-1.3", manufacturer="Canon", product="MF4800 Series", serial="ABC999")
+    _usb(tmp_path, "usb1", manufacturer="Linux", product="DWC OTG Controller")
+    devices = printing.usb_devices(tmp_path)
+    assert len(devices) == 3
+
+    hp = "ipp://HP%20DeskJet%203830%20series%20(USB)._ipp._tcp.local/"
+    canon = "usb://Canon/MF4800%20Series?serial=ABC999"
+    assert printing.usb_connected(hp, devices) is True
+    assert printing.usb_connected(canon, devices) is True
+    assert printing.usb_connected("usb://Canon/MF4800%20Series", devices) is True
+    assert printing.usb_connected("usb://Canon/MF4800%20Series?serial=OTHER", devices) is False
+    # Switched off: gone from the USB device list.
+    assert printing.usb_connected(hp, [d for d in devices if d["manufacturer"] != "HP"]) is False
+    # Network printers and unknown platforms can't be judged.
+    assert printing.usb_connected("ipp://192.168.0.50/ipp/print", devices) is None
+    assert printing.usb_connected(hp, None) is None
+    assert printing.usb_devices(tmp_path / "missing") is None
+
+
+def test_parse_lpstat_devices():
+    text = ("device for Canon_MF4820d: usb://Canon/MF4800%20Series?serial=ABC999\n"
+            "device for HP_DeskJet_3835: ipp://HP%20DeskJet%203830%20series%20(USB)._ipp._tcp.local/\n")
+    assert printing.parse_lpstat_devices(text) == {
+        "Canon_MF4820d": "usb://Canon/MF4800%20Series?serial=ABC999",
+        "HP_DeskJet_3835": "ipp://HP%20DeskJet%203830%20series%20(USB)._ipp._tcp.local/"}
+
+
+def test_switched_off_status():
+    printer = {"ok": True, "queued": 0, "alerts": [], "connected": False}
+    assert printing.status_label(printer) == ("Switched off", False)
+    assert printing.status_label(dict(printer, connected=None)) == ("Ready", True)
