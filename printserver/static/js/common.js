@@ -232,6 +232,7 @@ function sentMessage(count = 1, name = printerLabel(selectedPrinterInfo()) || "p
 /* ---------- print jobs saved on this phone (see outbox.js) ---------- */
 
 const ownJobs = new Set();   // jobs this page is sending itself (it reports on them)
+const PRINT_WAIT_MS = 20000; // longest the Print button spins before carrying on in the background
 
 async function countSavedJobs() {
   try {
@@ -293,13 +294,23 @@ async function submitPrintJob({ title, url, form, docs, options, button, count =
       job.key = Outbox.newKey();   // no storage (e.g. private mode): send without saving
     }
     ownJobs.add(job.key);
-    result = saved ? (await Outbox.flush({ only: job.key })).result : await Outbox.deliver(job);
+    const sending = saved ? Outbox.flush({ only: job.key }).then((r) => r.result) : Outbox.deliver(job);
+    // Don't keep the button spinning on a very slow connection: the job is
+    // saved and finishes in the background.
+    result = await Promise.race([sending, new Promise((resolve) =>
+      setTimeout(() => resolve(saved ? { slow: true } : undefined), PRINT_WAIT_MS))]) || await sending;
   } catch (err) {
     result = { failed: true, error: err.message };
   } finally {
     setBusy(button, false);
   }
   result = result || { ok: true };
+  if (result.deleted) return false;  // deleted from the queue page while sending
+  if (result.slow) {
+    ownJobs.delete(job.key);  // report it when it's done
+    toast("Slow connection: still sending. The job is saved, so you can carry on; it finishes in the background.", "", 7000);
+    return false;
+  }
   if (result.ok) {
     toast(sentMessage(count, label), "success");
     setServerOnline(true);

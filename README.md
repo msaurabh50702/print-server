@@ -202,6 +202,9 @@ update, again).
 - **Print queue → Saved on this phone** lists the saved jobs, with **Send now** and **Delete**.
 - Every job carries a unique key, so a job is never printed twice, even if the Wi-Fi drops
   after the Pi received it and the phone sends it again.
+- On mobile data or very weak Wi-Fi the phone first checks (for up to 4 seconds) that the Pi
+  answers, so nothing hangs. The Print button never spins for more than 20 seconds; a slow upload
+  finishes in the background. Deleting a saved job also stops a send that's in progress.
 
 Offline, **PDF download**, HEIC photos, the queue and ink levels need the Pi. On Android, saved
 jobs can also be sent after the app is closed; on iPhone they're sent while the app is open.

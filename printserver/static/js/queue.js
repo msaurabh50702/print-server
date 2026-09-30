@@ -190,7 +190,8 @@
         }
       });
       el.querySelector('[data-act="delete"]').addEventListener("click", async () => {
-        if (!confirm(`Delete "${job.title}"? It won't be printed.`)) return;
+        const note = job.status === "sending" ? " If the printer server has already received it, it may still print." : "";
+        if (!confirm(`Delete "${job.title}"? It won't be printed.${note}`)) return;
         await Outbox.remove(job.key);
       });
       return el;

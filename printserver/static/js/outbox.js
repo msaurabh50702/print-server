@@ -51,6 +51,29 @@
   const put = (job) => run("readwrite", (s) => s.put(job));
   const del = (key) => run("readwrite", (s) => s.delete(key));
 
+  // Save changes to a job only if it still exists: it may have been deleted
+  // (here, in another tab or by the service worker) while it was being sent.
+  async function update(job) {
+    const database = await db();
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      let kept = false;
+      const req = store.get(job.key);
+      req.onsuccess = () => {
+        if (req.result) {
+          store.put(job);
+          kept = true;
+        }
+      };
+      tx.oncomplete = () => resolve(kept);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // Sends in progress in this tab / worker, so deleting a job can stop its upload.
+  const inflight = new Map();
+
   function changed(detail = {}) {
     listeners.forEach((fn) => fn(detail));
     if (channel) channel.postMessage(detail);
@@ -67,6 +90,41 @@
   /* ---------- sending ---------- */
 
   const UNREACHABLE = "Printer server not reachable";
+  const PING_TIMEOUT_MS = 4000;
+  // Uploads may be slow on weak Wi-Fi, but must never hang forever: allow
+  // 20 s plus 1 s for every 20 kB (a slow ~160 kbit/s connection).
+  const timeoutFor = (bytes) => 20000 + bytes / 20;
+
+  // fetch() that gives up after `ms`, or when `signal` (deleting the job) says so.
+  async function timedFetch(url, init, ms, signal) {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), ms);
+    const stop = () => abort.abort();
+    if (signal) {
+      if (signal.aborted) abort.abort();
+      signal.addEventListener("abort", stop);
+    }
+    try {
+      return await fetch(url, { ...init, signal: abort.signal });
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", stop);
+    }
+  }
+
+  // Quick check before sending: on mobile data or weak Wi-Fi a request to the
+  // Pi can hang instead of failing, which would keep everything waiting.
+  async function reachable() {
+    try {
+      const res = await timedFetch("/api/ping", { cache: "no-store" }, PING_TIMEOUT_MS);
+      return res.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const sizeOf = (fields) => fields.reduce((sum, [, value]) =>
+    sum + (typeof value === "string" ? value.length : value.size || 0), 0);
 
   async function errorText(res) {
     try {
@@ -80,10 +138,10 @@
   // the server refused (bad page range, unknown printer...) won't get better.
   const temporary = (status) => status >= 500 || [408, 409, 425, 429].includes(status);
 
-  async function post(url, init) {
+  async function post(url, init, signal, bytes = 0) {
     let res;
     try {
-      res = await fetch(url, { method: "POST", ...init });
+      res = await timedFetch(url, { method: "POST", ...init }, timeoutFor(bytes), signal);
     } catch (_) {
       return { retry: true, error: UNREACHABLE };
     }
@@ -98,30 +156,37 @@
     return form;
   }
 
-  async function deliverDocuments(job) {
+  async function deliverDocuments(job, signal) {
     const items = [];
     for (const doc of job.docs) {
       const fresh = doc.id && (!doc.uploadedAt || Date.now() - doc.uploadedAt < UPLOAD_REUSE_MS || !doc.file);
       if (!fresh) {
         const form = new FormData();
         form.append("file", doc.file, doc.name);
-        const res = await post("/api/documents", { body: form });
+        const res = await post("/api/documents", { body: form }, signal, doc.file.size);
         if (!res.ok) return { ...res, error: `${doc.name}: ${res.error}` };
         doc.id = res.data.id;
         doc.uploadedAt = Date.now();
-        await put(job).catch(() => {});  // a retry can reuse the upload
+        await update(job).catch(() => {});  // a retry can reuse the upload
       }
       items.push({ id: doc.id, pages: doc.range || "" });
     }
     return post("/api/documents/print", {
       headers: { "Content-Type": "application/json", "X-Job-Key": job.key },
       body: JSON.stringify({ ...job.options, documents: items }),
-    });
+    }, signal);
   }
 
-  function deliver(job) {
-    if (job.kind === "documents") return deliverDocuments(job);
-    return post(job.url, { headers: { "X-Job-Key": job.key }, body: formData(job.fields) });
+  async function deliver(job) {
+    const abort = new AbortController();
+    inflight.set(job.key, abort);
+    try {
+      if (job.kind === "documents") return await deliverDocuments(job, abort.signal);
+      return await post(job.url, { headers: { "X-Job-Key": job.key }, body: formData(job.fields) },
+                        abort.signal, sizeOf(job.fields));
+    } finally {
+      inflight.delete(job.key);
+    }
   }
 
   // Only one sender at a time across tabs and the service worker.
@@ -138,10 +203,19 @@
   function flush({ only = null } = {}) {
     return exclusive(async () => {
       const report = { sent: [], failed: [], pending: false, result: null };
-      for (const job of await all()) {
-        if (only ? job.key !== only : job.status === "failed") continue;
+      const jobs = (await all()).filter((job) => (only ? job.key === only : job.status !== "failed"));
+      if (!jobs.length) {
+        if (only) report.result = { deleted: true };
+        return report;
+      }
+      if (!(await reachable())) {
+        report.pending = true;
+        if (only) report.result = { retry: true, error: UNREACHABLE };
+        return report;
+      }
+      for (const job of jobs) {
         job.status = "sending";
-        await put(job);
+        if (!(await update(job))) continue;  // deleted meanwhile
         changed();
         const result = await deliver(job);
         if (only) report.result = result;
@@ -150,12 +224,11 @@
           report.sent.push(job);
         } else if (result.failed) {
           Object.assign(job, { status: "failed", error: result.error });
-          await put(job);
-          report.failed.push(job);
+          if (await update(job)) report.failed.push(job);
         } else {
           Object.assign(job, { status: "waiting", error: result.error, attempts: (job.attempts || 0) + 1 });
-          await put(job);
-          report.pending = true;
+          if (await update(job)) report.pending = true;
+          else if (only) report.result = { deleted: true };
         }
         changed(result.ok ? { sent: job } : {});
         if (result.retry) break;
@@ -176,14 +249,25 @@
     const job = await get(key);
     if (!job) return null;
     Object.assign(job, { status: "waiting", error: "" });
-    await put(job);
+    if (!(await update(job))) return null;
     changed();
     return flush({ only: key });
   }
 
   async function remove(key) {
     await del(key);
+    const sending = inflight.get(key);
+    if (sending) sending.abort();
+    // Ask the service worker to stop its upload too (it may be sending in the background).
+    if (channel) channel.postMessage({ cancel: key });
     changed();
+  }
+
+  if (channel) {
+    channel.addEventListener("message", (e) => {
+      const key = e.data && e.data.cancel;
+      if (key && inflight.has(key)) inflight.get(key).abort();
+    });
   }
 
   global.Outbox = {

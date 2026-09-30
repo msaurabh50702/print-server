@@ -285,6 +285,13 @@ def create_app(config=None):
             info.update(dry_run=True, message="Dry-run mode: jobs are saved, not printed")
         return jsonify(info)
 
+    @app.get("/api/ping")
+    def ping():
+        """Cheap check that the server can be reached, before sending a saved job."""
+        response = jsonify(ok=True)
+        response.cache_control.no_store = True
+        return response
+
     @app.get("/api/printers")
     def printers_list():
         return jsonify(overview())
