@@ -189,7 +189,9 @@ and installing the certificate once, opening the `https` address and tapping **I
 ### Works offline
 
 The installed app (from `https://`) keeps itself on the phone, so it opens and works even when the
-Pi can't be reached: weak Wi-Fi, the Pi switched off, or the phone away from home.
+Pi can't be reached: weak Wi-Fi, the Pi switched off, or the phone away from home. Open the app once
+on Wi-Fi and wait until the home page says **✓ Saved on this phone: works offline** (after an
+update, again).
 
 - A banner says the printer server isn't reachable, and the status shows how many jobs are saved.
 - **Print** saves the job on the phone. It's sent automatically as soon as the Pi can be reached,

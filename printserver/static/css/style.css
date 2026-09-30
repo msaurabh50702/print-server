@@ -586,6 +586,9 @@ a.status:hover { border-color: var(--accent); }
 .offline-only { display: none; }
 .server-offline .offline-only { display: block; }
 
+.offline-ready { margin: 18px 0 0; text-align: center; font-size: .85rem; color: var(--muted); }
+.offline-ready.ok { color: var(--ok); }
+
 /* Shown while the print server can't be reached. */
 .offline-banner {
   display: flex; align-items: flex-start; gap: 12px; margin: 0 0 16px; padding: 12px 14px;

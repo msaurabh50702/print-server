@@ -337,10 +337,38 @@ document.addEventListener("visibilitychange", () => document.visibilityState ===
 // Pages restored from the back/forward cache carry old data.
 window.addEventListener("pageshow", (e) => e.persisted && refreshStatus());
 
-// Service worker: makes the app installable (browsers only allow this on HTTPS).
+// Service worker: makes the app installable and keeps it on the phone for
+// offline use (browsers only allow this on HTTPS).
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch(() => { /* not critical */ });
 }
+
+// Home page: say whether the app is saved on this phone yet (OFFLINE_PAGES in app.py).
+const OFFLINE_PAGES = ["/", "/photos", "/free-size", "/passport", "/id-card", "/document", "/queue"];
+let offlineChecks = 0;
+async function showOfflineReady() {
+  const el = document.getElementById("offline-ready");
+  if (!el) return;
+  el.hidden = false;
+  if (!("serviceWorker" in navigator) || !window.isSecureContext || !window.caches) {
+    el.textContent = "Offline use works in the app installed from the https:// address.";
+    return;
+  }
+  let ready = false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const saved = await Promise.all(OFFLINE_PAGES.map((url) => caches.match(url)));
+    ready = !!(navigator.serviceWorker.controller && reg && !reg.installing && saved.every(Boolean));
+    // A download interrupted by weak Wi-Fi is started again.
+    if (!ready && reg && !reg.installing && ++offlineChecks % 15 === 0) reg.update().catch(() => {});
+  } catch (_) { /* treat as not ready */ }
+  el.classList.toggle("ok", ready);
+  el.textContent = ready
+    ? "✓ Saved on this phone: works offline"
+    : "Saving the app for offline use… keep it open on Wi-Fi for a moment.";
+  if (!ready) setTimeout(showOfflineReady, 2000);
+}
+showOfflineReady();
 
 /* ---------- files shared from other apps (Share → Printer) ---------- */
 

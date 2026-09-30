@@ -11,9 +11,17 @@ const PAGES = __PAGES__;
 const ASSETS = __ASSETS__;
 const PAGE_TIMEOUT_MS = 3000;  // weak Wi-Fi: show the saved page instead of waiting
 
+// The PDF previewer is large (~1.5 MB); on weak Wi-Fi it mustn't stop the
+// rest of the app being saved, so it's fetched separately (and on first use).
+const OPTIONAL = ASSETS.filter((url) => url.startsWith("/static/vendor/"));
+const REQUIRED = [...PAGES, ...ASSETS.filter((url) => !OPTIONAL.includes(url))];
+const fresh = (url) => new Request(url, { cache: "reload" });
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) =>
-    cache.addAll([...PAGES, ...ASSETS].map((url) => new Request(url, { cache: "reload" })))));
+  event.waitUntil(caches.open(CACHE).then(async (cache) => {
+    await cache.addAll(REQUIRED.map(fresh));
+    await Promise.allSettled(OPTIONAL.map((url) => cache.add(fresh(url))));
+  }));
   self.skipWaiting();
 });
 
@@ -56,8 +64,14 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(page(event));
   } else if (url.pathname.startsWith("/static/") || url.pathname === "/manifest.webmanifest") {
     // Files belong to this version of the app, so the saved copy is always right.
-    event.respondWith(caches.match(request, { ignoreSearch: true })
-      .then((res) => res || fetch(request)));
+    event.respondWith(caches.match(request, { ignoreSearch: true }).then((res) => res ||
+      fetch(request).then((net) => {
+        if (net.ok) {
+          const copy = net.clone();
+          caches.open(CACHE).then((cache) => cache.put(url.pathname, copy));
+        }
+        return net;
+      })));
   }
   // API calls always go to the server.
 });
