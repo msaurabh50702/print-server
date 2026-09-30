@@ -186,6 +186,25 @@ and installing the certificate once, opening the `https` address and tapping **I
 (Gallery, WhatsApp, Files, Gmail…). Shared documents open in *Print documents*; shared photos offer
 *Photo page*, *Passport photos*, *ID card copy* (first photo = front, second = back) or *Print as documents*.
 
+### Works offline
+
+The installed app (from `https://`) keeps itself on the phone, so it opens and works even when the
+Pi can't be reached: weak Wi-Fi, the Pi switched off, or the phone away from home.
+
+- A banner says the printer server isn't reachable, and the status shows how many jobs are saved.
+- **Print** saves the job on the phone. It's sent automatically as soon as the Pi can be reached,
+  and printed straight away (or when the printer is switched on).
+- Photo pages (photos, free size, passport, ID card) work fully offline, including crop and rotate.
+- Documents: PDFs and images are previewed on the phone. Word, Excel and PowerPoint files can be
+  queued, but are previewed only once the Pi is reachable, because the Pi converts them.
+- **Print queue → Saved on this phone** lists the saved jobs, with **Send now** and **Delete**.
+- Every job carries a unique key, so a job is never printed twice, even if the Wi-Fi drops
+  after the Pi received it and the phone sends it again.
+
+Offline, **PDF download**, HEIC photos, the queue and ink levels need the Pi. On Android, saved
+jobs can also be sent after the app is closed; on iPhone they're sent while the app is open.
+After an update (`git pull` and a restart), the app on the phone updates itself on its next visit.
+
 ### Restart or shut down the Pi
 
 The Pi has no power button, so the app has one: open **Print queue** and scroll to **Print server**.
@@ -249,6 +268,7 @@ cd ~/print-server && git pull && sudo systemctl restart print-server
 ## Troubleshooting
 
 - **The status pill says "No printer"**: run `scripts/setup-printer.sh`, or set `PRINTER_NAME`.
+- **The status pill says "Offline · N saved"**: the phone can't reach the Pi. The saved jobs print automatically once it can; see [Works offline](#works-offline).
 - **The status pill says "Switched off"**: the USB printer is turned off or unplugged. Jobs sent now wait in the queue and print once it is back on.
 - **The status pill says "Offline"**: check the printer is on and the USB cable is connected, then run `cupsenable Canon_MF4820d`.
 - **Word/Excel files fail**: install LibreOffice: `sudo apt install libreoffice-writer libreoffice-calc libreoffice-impress`.

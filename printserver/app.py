@@ -1,4 +1,6 @@
 """Flask web app: photo sheets and document printing over the home network."""
+import functools
+import hashlib
 import json
 import mimetypes
 import re
@@ -13,9 +15,13 @@ from werkzeug.utils import secure_filename
 
 from . import documents, photos, printing, system
 from .history import JobHistory
+from .sentjobs import SentJobs
 from .config import Config
 
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+JOB_KEY_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+# Pages the installed app keeps on the phone so it opens without the server.
+OFFLINE_PAGES = ["/", "/photos", "/free-size", "/passport", "/id-card", "/document", "/queue", "/offline"]
 for _type, _ext in (("image/heic", ".heic"), ("image/heif", ".heif"), ("image/webp", ".webp")):
     mimetypes.add_type(_type, _ext)
 MAX_BATCH = 20
@@ -31,6 +37,7 @@ def create_app(config=None):
     jobs_dir = data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     history = JobHistory(data_dir / "history.json")
+    sent_jobs = SentJobs(data_dir / "sent-jobs.json")
 
     def cleanup_old_jobs():
         cutoff = time.time() - app.config["JOB_TTL_SECONDS"]
@@ -72,6 +79,7 @@ def create_app(config=None):
         label, ok = printing.status_label(default_info, dry_run)
         warn = ok and bool(default_info and default_info.get("alerts")) and not default_info["queued"]
         return {"printers": state["printers"], "default": default, "dry_run": dry_run,
+                "generated": time.time(),
                 "status": {"text": label, "ok": ok,
                            "state": "warn" if warn and not dry_run else ("ok" if ok else "bad")}}
 
@@ -125,6 +133,36 @@ def create_app(config=None):
         except (TypeError, ValueError):
             return default
 
+    def idempotent(view):
+        """Answer a repeated request (same X-Job-Key header) with the first reply.
+
+        Phones retry print jobs that were saved while the server was offline,
+        and on weak Wi-Fi the first attempt may have printed already.
+        """
+        @functools.wraps(view)
+        def wrapper(*args, **kwargs):
+            key = request.headers.get("X-Job-Key", "")
+            if not key:
+                return view(*args, **kwargs)
+            if not JOB_KEY_RE.match(key):
+                raise printing.PrintError("Invalid job key")
+            state, saved = sent_jobs.claim(key)
+            if state == "done":
+                return jsonify(saved)
+            if state == "busy":
+                return jsonify(error="This job is still being sent"), 409
+            try:
+                response = view(*args, **kwargs)
+            except BaseException:
+                sent_jobs.release(key)
+                raise
+            if response.status_code == 200:
+                sent_jobs.finish(key, response.get_json())
+            else:
+                sent_jobs.release(key)
+            return response
+        return wrapper
+
     @app.errorhandler(printing.PrintError)
     @app.errorhandler(documents.ConversionError)
     def handle_known_error(exc):
@@ -168,11 +206,37 @@ def create_app(config=None):
         response.cache_control.max_age = 3600
         return response
 
+    @functools.lru_cache(maxsize=1)
+    def offline_assets():
+        """Static files the installed app keeps on the phone, and a version for them.
+
+        The version changes whenever a file changes (e.g. after git pull and a
+        restart), so the phone's service worker notices and downloads the new files.
+        """
+        static = Path(app.static_folder)
+        files = sorted(p for p in static.rglob("*")
+                       if p.is_file() and p.name != "sw.js" and p.suffix in
+                       (".js", ".css", ".png", ".svg", ".webmanifest"))
+        digest = hashlib.sha256()
+        for folder in (static, Path(app.root_path) / app.template_folder):
+            for path in sorted(folder.rglob("*")):
+                if path.is_file():
+                    digest.update(str(path.relative_to(folder)).encode())
+                    digest.update(path.read_bytes())
+        urls = ["/static/" + p.relative_to(static).as_posix() for p in files]
+        return digest.hexdigest()[:12], urls
+
     @app.get("/sw.js")
     def service_worker():
         # Served from the root so it controls the whole app; never cached so
         # updates to it are picked up straight away.
-        response = send_from_directory(app.static_folder, "sw.js", mimetype="text/javascript")
+        version, assets = offline_assets()
+        source = (Path(app.static_folder) / "sw.js").read_text()
+        source = (source.replace('"__VERSION__"', json.dumps(version))
+                  .replace("__PAGES__", json.dumps(OFFLINE_PAGES))
+                  .replace("__ASSETS__", json.dumps(assets + ["/manifest.webmanifest"])))
+        response = make_response(source)
+        response.mimetype = "text/javascript"
         response.cache_control.no_cache = True
         return response
 
@@ -274,6 +338,7 @@ def create_app(config=None):
                          as_attachment=True, download_name="photos.pdf")
 
     @app.post("/api/photos/print")
+    @idempotent
     def photos_print():
         target = print_target(request.form)  # check the printer before the slow work
         pdf_path = compose_photo_request()
@@ -303,6 +368,7 @@ def create_app(config=None):
                          as_attachment=True, download_name="id-card.pdf")
 
     @app.post("/api/id-card/print")
+    @idempotent
     def id_card_print():
         target = print_target(request.form)
         pdf_path = compose_id_card_request()
@@ -336,6 +402,7 @@ def create_app(config=None):
                          as_attachment=True, download_name="passport-photos.pdf")
 
     @app.post("/api/passport/print")
+    @idempotent
     def passport_print():
         target = print_target(request.form)
         pdf_path = compose_passport_request()
@@ -393,6 +460,7 @@ def create_app(config=None):
                          as_attachment=True, download_name="free-size.pdf")
 
     @app.post("/api/free-size/print")
+    @idempotent
     def free_size_print():
         target = print_target(request.form)
         pdf_path = compose_free_request()
@@ -520,6 +588,7 @@ def create_app(config=None):
                 for pdf, ranges, name in prepared]
 
     @app.post("/api/documents/<job_id>/print")
+    @idempotent
     def document_print(job_id):
         job_dir(job_id)
         options = request.get_json(silent=True) or {}
@@ -527,6 +596,7 @@ def create_app(config=None):
         return jsonify(job=jobs[0])
 
     @app.post("/api/documents/print")
+    @idempotent
     def documents_print_batch():
         options = request.get_json(silent=True) or {}
         items = options.get("documents")

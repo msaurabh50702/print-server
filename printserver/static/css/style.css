@@ -579,6 +579,22 @@ a.status:hover { border-color: var(--accent); }
 .badge.cancelled { color: var(--danger); }
 @keyframes pulse-bg { 50% { opacity: .55; } }
 .job-cancel { flex: none; }
+.queue-note { margin: -4px 0 12px; font-size: .88rem; }
+.saved-actions { display: flex; gap: 2px; flex: none; }
+.saved-job .job-title, .saved-job .job-meta { white-space: normal; overflow-wrap: anywhere; }
+.job-error { color: var(--danger); font-size: .82rem; }
+.offline-only { display: none; }
+.server-offline .offline-only { display: block; }
+
+/* Shown while the print server can't be reached. */
+.offline-banner {
+  display: flex; align-items: flex-start; gap: 12px; margin: 0 0 16px; padding: 12px 14px;
+  border-radius: var(--radius); background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); animation: fade .25s var(--ease);
+}
+.offline-banner[hidden] { display: none; }
+.offline-banner .icon { flex: none; width: 22px; height: 22px; color: var(--warn); margin-top: 1px; }
+.offline-banner p { margin: 0; font-size: .9rem; line-height: 1.4; }
 .empty-state { display: flex; align-items: center; gap: 14px; padding: 18px; }
 .empty-state div { display: grid; }
 .empty-icon {

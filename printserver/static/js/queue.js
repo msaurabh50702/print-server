@@ -78,9 +78,12 @@
     if (loading) return;
     loading = true;
     try {
-      render(await (await fetch("/api/queue")).json());
+      const res = await fetch("/api/queue");
+      if (!res.ok) throw new Error();
+      render(await res.json());
     } catch (_) {
-      toast("Could not load the queue", "error");
+      // Offline: the banner says so; keep showing the queue as last seen.
+      if (serverOnline) toast("Could not load the queue", "error");
     } finally {
       loading = false;
     }
@@ -148,6 +151,55 @@
     if (!printers.length) panel.innerHTML = '<p class="hint">No printers set up yet.</p>';
   }
 
+  /* ---------- jobs saved on this phone (server was offline) ---------- */
+
+  const savedSection = document.getElementById("saved-section");
+  const savedList = document.getElementById("saved-list");
+  const savedTemplate = document.getElementById("saved-item");
+  const SAVED_STATES = { waiting: ["Waiting", "waiting"], sending: ["Sending…", "printing"], failed: ["Not sent", "cancelled"] };
+
+  async function renderSaved() {
+    let jobs = [];
+    try { jobs = await Outbox.all(); } catch (_) { /* storage unavailable */ }
+    savedSection.hidden = !jobs.length;
+    savedList.replaceChildren(...jobs.map((job) => {
+      const el = savedTemplate.content.firstElementChild.cloneNode(true);
+      el.querySelector(".job-title").textContent = job.title;
+      el.querySelector(".job-meta").textContent = `${job.printerLabel} · saved ${ago(job.created / 1000)}`;
+      const [label, cls] = SAVED_STATES[job.status] || SAVED_STATES.waiting;
+      const badge = el.querySelector(".badge");
+      badge.textContent = label;
+      badge.className = `badge ${cls}`;
+      const error = el.querySelector(".job-error");
+      if (job.status === "failed" && job.error) {
+        error.hidden = false;
+        error.textContent = job.error;
+      }
+      const sendBtn = el.querySelector('[data-act="send"]');
+      sendBtn.disabled = job.status === "sending";
+      sendBtn.addEventListener("click", async () => {
+        setBusy(sendBtn, true);
+        try {
+          const report = await Outbox.retry(job.key);
+          const result = report && report.result;
+          if (result && result.ok) toast(sentMessage(1, job.printerLabel), "success");
+          else if (result) toast(result.retry ? `${Outbox.UNREACHABLE}. It stays saved and will be sent automatically.` : result.error, result.retry ? "" : "error", 5000);
+          refreshStatus();
+        } finally {
+          setBusy(sendBtn, false);
+        }
+      });
+      el.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+        if (!confirm(`Delete "${job.title}"? It won't be printed.`)) return;
+        await Outbox.remove(job.key);
+      });
+      return el;
+    }));
+  }
+
+  Outbox.onChange(renderSaved);
+  renderSaved();
+
   /* ---------- restart / shut down the Pi ---------- */
   const POWER = {
     restart: {
@@ -169,7 +221,7 @@
         if (!res.ok) throw new Error(await readError(res));
         toast(action.done, "success");
       } catch (err) {
-        toast(err.message, "error");
+        toast(networkError(err).message, "error");
         setBusy(button, false);
       }
     });
@@ -180,6 +232,6 @@
 
   // The page arrives with the queue embedded, then refreshes in the background.
   render(window.INITIAL_QUEUE || { active: [], recent: [] });
-  setInterval(() => document.visibilityState === "visible" && load(), 5000);
+  setInterval(() => document.visibilityState === "visible" && serverOnline && load(), 5000);
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && load());
 })();

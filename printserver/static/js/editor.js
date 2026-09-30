@@ -30,7 +30,12 @@ async function serverJpeg(file) {
   if (convertedPhotos.has(file)) return convertedPhotos.get(file);
   const form = new FormData();
   form.append("file", file, file.name || "photo");
-  const res = await fetch("/api/images/jpeg", { method: "POST", body: form });
+  let res;
+  try {
+    res = await fetch("/api/images/jpeg", { method: "POST", body: form });
+  } catch (_) {
+    throw new Error("This photo (e.g. HEIC) can only be opened while the printer server is reachable. Choose a JPEG, or try again when connected.");
+  }
   if (!res.ok) throw new Error("This photo format isn't supported");
   const blob = await res.blob();
   convertedPhotos.set(file, blob);

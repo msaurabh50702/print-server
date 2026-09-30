@@ -925,3 +925,81 @@ def test_power_buttons(client, app, monkeypatch):
     assert client.post("/api/system/restart").get_json() == {"ok": True}
     assert started == [["sudo", "-n", "/usr/bin/systemctl", "poweroff"],
                        ["sudo", "-n", "/usr/bin/systemctl", "reboot"]]
+
+
+def test_idempotent_print_is_sent_once(client, app, tmp_path):
+    headers = {"X-Job-Key": "0d9b8f5e-1111-4a2b-9c3d-abcdefabcdef"}
+    data = lambda: {"layout": "1", "copies": "1", "cell0": (jpeg(), "a.jpg")}
+    first = client.post("/api/photos/print", data=data(), headers=headers,
+                        content_type="multipart/form-data")
+    assert first.status_code == 200
+    again = client.post("/api/photos/print", data=data(), headers=headers,
+                        content_type="multipart/form-data")
+    assert again.get_json() == first.get_json()
+    assert len(list((tmp_path / "out").glob("*.pdf"))) == 1
+    # Remembered across restarts of the server.
+    fresh = create_app({"DATA_DIR": tmp_path, "DRY_RUN": True,
+                        "DRY_RUN_DIR": tmp_path / "out", "TESTING": True}).test_client()
+    assert fresh.post("/api/photos/print", data=data(), headers=headers,
+                      content_type="multipart/form-data").get_json() == first.get_json()
+    assert len(list((tmp_path / "out").glob("*.pdf"))) == 1
+    # A different key prints again; a malformed key is refused.
+    other = client.post("/api/photos/print", data=data(), headers={"X-Job-Key": "another-key-123"},
+                        content_type="multipart/form-data")
+    assert other.status_code == 200 and other.get_json() != first.get_json()
+    assert client.post("/api/photos/print", data=data(), headers={"X-Job-Key": "bad key!"},
+                       content_type="multipart/form-data").status_code == 400
+
+
+def test_idempotent_failure_can_be_retried(client):
+    headers = {"X-Job-Key": "retry-after-error-1"}
+    # No photos: refused, and the key isn't used up.
+    assert client.post("/api/photos/print", data={"layout": "1"}, headers=headers).status_code == 400
+    ok = client.post("/api/photos/print", data={"layout": "1", "cell0": (jpeg(), "a.jpg")},
+                     headers=headers, content_type="multipart/form-data")
+    assert ok.status_code == 200
+
+
+def test_idempotent_busy(tmp_path):
+    from printserver.sentjobs import SentJobs
+    jobs = SentJobs(tmp_path / "s.json")
+    assert jobs.claim("k1") == ("new", None)
+    assert jobs.claim("k1") == ("busy", None)
+    jobs.release("k1")
+    assert jobs.claim("k1") == ("new", None)
+    jobs.finish("k1", {"job": "x"})
+    assert jobs.claim("k1") == ("done", {"job": "x"})
+
+
+def test_idempotent_documents_batch(client, tmp_path):
+    doc = client.post("/api/documents", data={"file": (jpeg(), "scan.jpg")},
+                      content_type="multipart/form-data").get_json()
+    body = {"documents": [{"id": doc["id"], "pages": ""}], "copies": 1}
+    headers = {"X-Job-Key": "documents-batch-key-1"}
+    first = client.post("/api/documents/print", json=body, headers=headers)
+    assert first.status_code == 200
+    assert client.post("/api/documents/print", json=body, headers=headers).get_json() == first.get_json()
+    assert len(list((tmp_path / "out").glob("*.pdf"))) == 1
+
+
+def test_service_worker_lists_offline_files(client):
+    res = client.get("/sw.js")
+    assert res.status_code == 200 and res.mimetype == "text/javascript"
+    body = res.get_data(as_text=True)
+    assert "__VERSION__" not in body and "__PAGES__" not in body and "__ASSETS__" not in body
+    for url in ("/static/js/outbox.js", "/static/js/common.js", "/static/css/style.css",
+                "/static/vendor/pdfjs/pdf.worker.min.js", "/manifest.webmanifest", '"/photos"', '"/document"'):
+        assert url in body
+    assert "no-cache" in res.headers["Cache-Control"]
+    # Every page the app keeps offline exists.
+    import re as _re
+    pages = json.loads(_re.search(r"const PAGES = (\[.*?\]);", body).group(1))
+    for page in pages:
+        assert client.get(page).status_code == 200, page
+
+
+def test_offline_banner_and_outbox_script_on_pages(client):
+    html = client.get("/photos").get_data(as_text=True)
+    assert 'id="offline-banner"' in html and "js/outbox.js" in html
+    assert '"generated"' in html
+    assert 'id="saved-section"' in client.get("/queue").get_data(as_text=True)

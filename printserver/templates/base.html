@@ -26,10 +26,15 @@
     <a id="printer-status" class="status {{ boot.status.state }}" href="{{ url_for('queue_page') }}" aria-label="Printer status and print queue"><i class="dot"></i><span class="status-text">{{ boot.status.text }}</span></a>
   </header>
   <main class="container">
+    <div id="offline-banner" class="offline-banner" role="status" hidden>
+      {{ icon("offline") }}
+      <p><strong>Printer server not reachable.</strong> You can keep working: print jobs are saved on this phone and print automatically when it's back.</p>
+    </div>
     {% block content %}{% endblock %}
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script>window.BOOT = {{ boot|tojson }};</script>
+  <script src="{{ url_for('static', filename='js/outbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/common.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

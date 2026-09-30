@@ -1,14 +1,18 @@
 "use strict";
 
 let toastTimer;
-function toast(message, kind = "") {
+function toast(message, kind = "", ms = 3500) {
   const el = document.getElementById("toast");
   el.textContent = message;
   el.className = "toast show " + kind;
   if (kind === "success" && navigator.vibrate) navigator.vibrate(30);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.className = "toast " + kind), 3500);
+  toastTimer = setTimeout(() => (el.className = "toast " + kind), ms);
 }
+
+// fetch() rejects with a TypeError when the server can't be reached at all.
+const networkError = (err) =>
+  err instanceof TypeError ? new Error("Printer server not reachable. Check the Wi-Fi and try again.") : err;
 
 async function readError(response) {
   try {
@@ -147,7 +151,9 @@ function renderStatus() {
   const info = selectedPrinterInfo();
   const alert = printerAlert(info);
   let text, state;
-  if (!info) [text, state] = ["No printer", "bad"];
+  if (!serverOnline) [text, state] = [waitingJobs ? `Offline · ${waitingJobs} saved` : "Server offline", "bad"];
+  else if (waitingJobs) [text, state] = [`Sending (${waitingJobs})`, "ok"];
+  else if (!info) [text, state] = ["No printer", "bad"];
   else if (overviewData.dry_run) [text, state] = ["Test mode", "ok"];
   else if (!info.ok) [text, state] = ["Offline", "bad"];
   else if (info.connected === false) [text, state] = ["Switched off", "bad"];
@@ -170,19 +176,39 @@ function applyOverview(data) {
   document.dispatchEvent(new CustomEvent("overview", { detail: data }));
 }
 
+/* ---------- server reachable? ---------- */
+
+const OVERVIEW_KEY = "overview";
+let serverOnline = true;
+let waitingJobs = 0;     // print jobs saved on this phone, not sent yet
+
+function setServerOnline(online) {
+  serverOnline = online;
+  document.body.classList.toggle("server-offline", !online);
+  const banner = document.getElementById("offline-banner");
+  if (banner) banner.hidden = online;
+  renderStatus();
+}
+
 let refreshing = null;
 function refreshStatus() {
-  // One request at a time; callers during a refresh share it.
-  refreshing = refreshing || fetch("/api/printers")
-    .then((res) => res.json())
-    .then(applyOverview)
-    .catch(() => {
-      const el = document.getElementById("printer-status");
-      el.querySelector(".status-text").textContent = "Server offline";
-      el.classList.remove("ok");
-      el.classList.add("bad");
+  // One request at a time; callers during a refresh share it. Weak Wi-Fi
+  // shouldn't leave the page waiting forever.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 8000);
+  refreshing = refreshing || fetch("/api/printers", { signal: abort.signal })
+    .then((res) => {
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      return res.json();
     })
-    .finally(() => { refreshing = null; });
+    .then((data) => {
+      try { localStorage.setItem(OVERVIEW_KEY, JSON.stringify(data)); } catch (_) { /* private mode */ }
+      applyOverview(data);
+      setServerOnline(true);
+      if (waitingJobs) sendSavedJobs();
+    })
+    .catch(() => setServerOnline(false))
+    .finally(() => { clearTimeout(timer); refreshing = null; });
   return refreshing;
 }
 
@@ -199,15 +225,111 @@ document.addEventListener("change", (e) => {
 });
 
 // Success message naming the printer the job went to.
-function sentMessage(count = 1) {
-  const name = printerLabel(selectedPrinterInfo()) || "printer";
+function sentMessage(count = 1, name = printerLabel(selectedPrinterInfo()) || "printer") {
   return count > 1 ? `Sent ${count} documents to ${name}` : `Sent to ${name}`;
+}
+
+/* ---------- print jobs saved on this phone (see outbox.js) ---------- */
+
+const ownJobs = new Set();   // jobs this page is sending itself (it reports on them)
+
+async function countSavedJobs() {
+  try {
+    waitingJobs = (await Outbox.all()).filter((job) => job.status !== "failed").length;
+  } catch (_) {
+    waitingJobs = 0;
+  }
+  renderStatus();
+}
+
+let sending = null;
+function sendSavedJobs() {
+  sending = sending || Outbox.flush()
+    .then((report) => {
+      if (report.sent.length) refreshStatus();
+      if (report.pending && !report.sent.length) setServerOnline(false);
+    })
+    .catch(() => { /* storage unavailable */ })
+    .finally(() => { sending = null; });
+  return sending;
+}
+
+// Android can send saved jobs later even if the app is closed.
+function sendInBackgroundLater() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.ready
+    .then((reg) => reg.sync && reg.sync.register("outbox"))
+    .catch(() => { /* not supported (e.g. iPhone): sent when the app is open */ });
+}
+
+if (window.Outbox) {
+  Outbox.onChange((detail) => {
+    countSavedJobs();
+    const job = detail.sent;
+    if (job && !ownJobs.has(job.key)) toast(`Saved job sent: ${job.title} → ${job.printerLabel}`, "success", 5000);
+  });
+}
+
+/**
+ * Print: the job is saved on this phone first, then sent. If the server
+ * can't be reached it stays saved and is sent automatically later.
+ * job: { title, url + form } or { title, docs + options } (documents).
+ * Returns true when the server accepted the job.
+ */
+async function submitPrintJob({ title, url, form, docs, options, button, count = 1 }) {
+  const label = printerLabel(selectedPrinterInfo()) || selectedPrinter() || "printer";
+  const job = docs
+    ? { kind: "documents", title, docs, options }
+    : { kind: "form", title, url, fields: [...form.entries()] };
+  Object.assign(job, { printer: selectedPrinter(), printerLabel: label, count });
+  setBusy(button, true);
+  let saved = false, result;
+  try {
+    try {
+      await Outbox.add(job);
+      saved = true;
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    } catch (_) {
+      job.key = Outbox.newKey();   // no storage (e.g. private mode): send without saving
+    }
+    ownJobs.add(job.key);
+    result = saved ? (await Outbox.flush({ only: job.key })).result : await Outbox.deliver(job);
+  } catch (err) {
+    result = { failed: true, error: err.message };
+  } finally {
+    setBusy(button, false);
+  }
+  result = result || { ok: true };
+  if (result.ok) {
+    toast(sentMessage(count, label), "success");
+    setServerOnline(true);
+    refreshStatus();
+    return true;
+  }
+  if (result.retry && saved) {
+    setServerOnline(false);
+    sendInBackgroundLater();
+    toast("Printer server not reachable. The job is saved on this phone and will print automatically when the server is back.", "", 7000);
+    return false;
+  }
+  if (saved) await Outbox.remove(job.key).catch(() => {});
+  toast(result.error, "error");
+  return false;
 }
 
 // The page arrives with printer data embedded, so it shows immediately;
 // after that, refresh quietly in the background.
 let overviewData = window.BOOT || { printers: [], default: null, dry_run: false };
+// A page opened from the copy saved on the phone carries old printer data;
+// the latest the phone has seen is better.
+try {
+  const stored = JSON.parse(localStorage.getItem(OVERVIEW_KEY) || "null");
+  if (stored && (stored.generated || 0) > (overviewData.generated || 0)) overviewData = stored;
+} catch (_) { /* private mode */ }
 applyOverview(overviewData);
+if (!overviewData.generated || Date.now() / 1000 - overviewData.generated > 20) refreshStatus();
+if (window.Outbox) countSavedJobs().then(() => waitingJobs && serverOnline && sendSavedJobs());
+window.addEventListener("online", () => refreshStatus());
 // Page scripts load after this file; tell them about the printer once they're listening.
 document.addEventListener("DOMContentLoaded", applyPrinterCaps);
 setInterval(() => document.visibilityState === "visible" && refreshStatus(), 10000);

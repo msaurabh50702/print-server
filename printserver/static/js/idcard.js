@@ -72,7 +72,7 @@
       if (!res.ok) throw new Error(await readError(res));
       return res;
     } catch (err) {
-      toast(err.message, "error");
+      toast(networkError(err).message, "error");
       return null;
     } finally {
       setBusy(button, false);
@@ -80,11 +80,9 @@
   }
 
   const printBtn = document.getElementById("print-card");
-  printBtn.addEventListener("click", async () => {
-    if (await send("/api/id-card/print", printBtn)) {
-      toast(sentMessage(), "success");
-      refreshStatus();
-    }
+  printBtn.addEventListener("click", () => {
+    const form = buildForm();
+    if (form) submitPrintJob({ title: "ID card copy", url: "/api/id-card/print", form, button: printBtn });
   });
 
   const pdfBtn = document.getElementById("download-pdf");

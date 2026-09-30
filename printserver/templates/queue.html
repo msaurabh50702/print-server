@@ -6,7 +6,14 @@
   <h2 class="section-title queue-title">Printers</h2>
   <div id="printer-panel" class="printer-panel"></div>
 
+  <div id="saved-section" hidden>
+    <h2 class="section-title queue-title">Saved on this phone</h2>
+    <p class="hint queue-note">These jobs print automatically as soon as the printer server can be reached.</p>
+    <ul id="saved-list" class="job-list"></ul>
+  </div>
+
   <h2 class="section-title queue-title">Printing &amp; waiting</h2>
+  <p class="hint queue-note offline-only">As last seen: this can't be updated while the printer server is offline.</p>
   <ul id="active-list" class="job-list" aria-live="polite"></ul>
   <div id="active-empty" class="card empty-state" hidden>
     <span class="empty-icon">{{ icon("check") }}</span>
@@ -39,6 +46,21 @@
     </div>
     <span class="badge"></span>
     <button class="icon-btn danger job-cancel" type="button" aria-label="Cancel job" hidden>{{ icon("x") }}</button>
+  </li>
+</template>
+<template id="saved-item">
+  <li class="job card saved-job">
+    <span class="job-icon">{{ icon("cloud-up") }}</span>
+    <div class="job-info">
+      <strong class="job-title"></strong>
+      <span class="hint job-meta"></span>
+      <span class="job-error" hidden></span>
+    </div>
+    <span class="badge"></span>
+    <div class="saved-actions">
+      <button class="icon-btn" type="button" data-act="send" aria-label="Send now">{{ icon("reset") }}</button>
+      <button class="icon-btn danger" type="button" data-act="delete" aria-label="Delete saved job">{{ icon("trash") }}</button>
+    </div>
   </li>
 </template>
 {% endblock %}
