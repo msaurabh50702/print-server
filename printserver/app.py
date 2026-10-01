@@ -166,6 +166,13 @@ def create_app(config=None):
     @app.errorhandler(printing.PrintError)
     @app.errorhandler(documents.ConversionError)
     def handle_known_error(exc):
+        if request.method == "POST":
+            # Enough to tell a bad request from one that arrived damaged
+            # (see: journalctl -u print-server).
+            app.logger.warning(
+                "%s refused: %s (%s bytes, %s; fields %s; files %s)", request.path, exc,
+                request.content_length, request.mimetype, sorted(request.form.keys()),
+                {k: f.filename for k, f in request.files.items()})
         return jsonify(error=str(exc)), 400
 
     @app.errorhandler(413)

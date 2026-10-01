@@ -150,9 +150,22 @@
     return temporary(res.status) ? { retry: true, error } : { failed: true, error };
   }
 
-  function formData(fields) {
+  // Files kept in the phone's storage are read into memory before sending:
+  // some phones sent them over HTTPS as an empty form.
+  async function inMemory(blob, name) {
+    try {
+      return new File([await blob.arrayBuffer()], name || blob.name || "file", { type: blob.type });
+    } catch (_) {
+      throw new Error("The saved photos or files can't be read any more. Please print again.");
+    }
+  }
+
+  async function formData(fields) {
+    if (!Array.isArray(fields) || !fields.length) throw new Error("This saved job is empty. Please print again.");
     const form = new FormData();
-    for (const [name, value] of fields) form.append(name, value);
+    for (const [name, value] of fields) {
+      form.append(name, typeof value === "string" ? value : await inMemory(value));
+    }
     return form;
   }
 
@@ -162,7 +175,7 @@
       const fresh = doc.id && (!doc.uploadedAt || Date.now() - doc.uploadedAt < UPLOAD_REUSE_MS || !doc.file);
       if (!fresh) {
         const form = new FormData();
-        form.append("file", doc.file, doc.name);
+        form.append("file", await inMemory(doc.file, doc.name));
         const res = await post("/api/documents", { body: form }, signal, doc.file.size);
         if (!res.ok) return { ...res, error: `${doc.name}: ${res.error}` };
         doc.id = res.data.id;
@@ -182,8 +195,10 @@
     inflight.set(job.key, abort);
     try {
       if (job.kind === "documents") return await deliverDocuments(job, abort.signal);
-      return await post(job.url, { headers: { "X-Job-Key": job.key }, body: formData(job.fields) },
+      return await post(job.url, { headers: { "X-Job-Key": job.key }, body: await formData(job.fields) },
                         abort.signal, sizeOf(job.fields));
+    } catch (err) {
+      return { failed: true, error: err.message };  // unreadable saved job: retrying won't help
     } finally {
       inflight.delete(job.key);
     }
