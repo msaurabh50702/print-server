@@ -96,7 +96,7 @@ def create_app(config=None):
                 continue
             state = "cancelled" if entry.get("cancelled") else "done"
             recent.append({**entry, "state": state})
-        return {"active": active, "recent": recent[:RECENT_JOBS]}
+        return {"active": active, "recent": recent[:RECENT_JOBS], "now": time.time()}
 
     @app.context_processor
     def inject_boot():
@@ -321,6 +321,17 @@ def create_app(config=None):
         printing.cancel_job(job_id)
         history.mark_cancelled(job_id)
         return jsonify(ok=True)
+
+    @app.post("/api/clock")
+    def set_clock():
+        """A phone sends its time when the Pi's clock is clearly wrong (no internet time)."""
+        data = request.get_json(silent=True) or {}
+        since = system.boot_time()
+        result = system.set_clock(data.get("now"), app.config["DRY_RUN"])
+        if result["adjusted"] and since is not None:
+            # Jobs printed since the Pi started were stamped with the wrong time.
+            history.shift_since(since, result["offset"])
+        return jsonify(result)
 
     @app.post("/api/system/<action>")
     def system_power(action):

@@ -15,7 +15,8 @@ set -euo pipefail
 
 ENV_FILE=/etc/default/print-server
 CA_DEST=/etc/print-server/ca.crt
-CADDY_CA=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+CADDY_DATA=/var/lib/caddy/.local/share/caddy
+CADDY_CA=$CADDY_DATA/pki/authorities/local/root.crt
 APP_PORT=8080
 
 HOST_NAME="${HOST_NAME:-$(hostname).local}"
@@ -38,7 +39,14 @@ http:// {
 }
 
 $sites {
-	tls internal
+	# Caddy's own certificates normally last 12 hours. A Pi without internet
+	# time has a clock that's behind after a power cut, and phones then see an
+	# expired certificate; 6 days (just under the 7-day intermediate) is safe.
+	tls {
+		issuer internal {
+			lifetime 144h
+		}
+	}
 	reverse_proxy 127.0.0.1:$APP_PORT
 }
 EOF
@@ -84,6 +92,8 @@ echo "==> Configuring Caddy for $HOST_NAME ${HOST_IPS}"
 caddyfile | sudo tee /etc/caddy/Caddyfile >/dev/null
 sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 sudo systemctl enable caddy >/dev/null 2>&1
+# Site certificates are re-issued with the new lifetime; the CA phones trust stays.
+sudo rm -rf "$CADDY_DATA/certificates/local"
 sudo systemctl restart caddy
 
 echo "==> Waiting for Caddy to create the certificate authority"

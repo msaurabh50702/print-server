@@ -176,6 +176,25 @@ function applyOverview(data) {
   document.dispatchEvent(new CustomEvent("overview", { detail: data }));
 }
 
+/* ---------- the Pi's clock ---------- */
+
+// Without internet the Pi's clock is behind after every power cut (it has no
+// clock battery), which shows wrong job times and can even break HTTPS. The
+// phone knows the right time, so it tells the Pi when they disagree.
+let clockSent = false;
+function syncClock(data) {
+  if (clockSent || data.dry_run || !data.generated) return;
+  if (Math.abs(Date.now() / 1000 - data.generated) < 120) return;
+  clockSent = true;
+  fetch("/api/clock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ now: Date.now() / 1000 }),
+  }).then((res) => res.ok && res.json())
+    .then((result) => result && result.adjusted && document.dispatchEvent(new CustomEvent("clockfixed")))
+    .catch(() => { /* not critical */ });
+}
+
 /* ---------- server reachable? ---------- */
 
 const OVERVIEW_KEY = "overview";
@@ -206,6 +225,7 @@ function refreshStatus() {
       try { localStorage.setItem(OVERVIEW_KEY, JSON.stringify(data)); } catch (_) { /* private mode */ }
       applyOverview(data);
       setServerOnline(true);
+      syncClock(data);
       if (waitingJobs) sendSavedJobs();
     })
     .catch(() => setServerOnline(false))

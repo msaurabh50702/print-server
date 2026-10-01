@@ -273,6 +273,14 @@ cd ~/print-server && git pull && sudo systemctl restart print-server
 ## Troubleshooting
 
 - **The status pill says "No printer"**: run `scripts/setup-printer.sh`, or set `PRINTER_NAME`.
+- **The Wi-Fi has no internet** (the Pi and phones only talk to each other): it works, with two things to know.
+  - *Android* may leave or ignore a Wi-Fi without internet. When it asks, choose **Stay connected**, and turn off
+    automatic switching to mobile data (Samsung: Settings → Connections → Wi-Fi → ⋮ → Intelligent Wi-Fi →
+    Switch to mobile data; other phones: in the Wi-Fi network's settings). Or turn off mobile data while printing.
+  - *The Pi's clock*: a Pi has no clock battery, so without internet time it's behind after every power cut.
+    The app sets it from the phone's clock automatically (allowed by `scripts/setup-permissions.sh`, which
+    `install.sh` runs), and `enable-https.sh` makes certificates last 6 days instead of 12 hours, so a clock
+    that's behind doesn't break HTTPS. For a clock that's always right, add a DS3231 real-time clock module.
 - **The status pill says "Offline · N saved"**: the phone can't reach the Pi. The saved jobs print automatically once it can; see [Works offline](#works-offline).
 - **The status pill says "Switched off"**: the USB printer is turned off or unplugged. Jobs sent now wait in the queue and print once it is back on.
 - **The status pill says "Offline"**: check the printer is on and the USB cable is connected, then run `cupsenable Canon_MF4820d`.

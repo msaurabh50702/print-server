@@ -38,6 +38,19 @@ class JobHistory:
                     entry["cancelled"] = True
             self._save(entries)
 
+    def shift_since(self, since, offset):
+        """Correct the times of jobs recorded since `since` by `offset` seconds.
+
+        Used when the clock is corrected: jobs printed while it was wrong
+        would otherwise show the wrong "minutes ago".
+        """
+        with self.lock:
+            entries = self._load()
+            for entry in entries:
+                if entry.get("time", 0) >= since:
+                    entry["time"] += offset
+            self._save(entries)
+
     def recent(self):
         """Newest first."""
         with self.lock:

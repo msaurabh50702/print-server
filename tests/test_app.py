@@ -3,6 +3,7 @@ import io
 import os
 import shutil
 import subprocess
+import time
 
 import pytest
 from PIL import Image
@@ -1019,3 +1020,41 @@ def test_refused_print_is_logged(client, caplog):
         res = client.post("/api/photos/print", data={"copies": "1"})
     assert res.get_json()["error"] == "Unknown layout"
     assert "/api/photos/print refused: Unknown layout" in caplog.text and "['copies']" in caplog.text
+
+
+def test_clock_is_set_from_phone_when_far_off(monkeypatch, app, client, tmp_path):
+    from printserver import system
+    calls = []
+    monkeypatch.setattr(system, "clock_synchronized", lambda: False)
+    monkeypatch.setattr(system.subprocess, "run",
+                        lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0))
+    now = time.time()
+    # Close enough: left alone.
+    assert system.set_clock(now + 30) == {"adjusted": False, "offset": 30}
+    # Ten hours behind: corrected with sudo date.
+    result = system.set_clock(now + 36000)
+    assert result["adjusted"] and 35990 < result["offset"] < 36010
+    assert calls[-1][:4] == ["sudo", "-n", "/usr/bin/date", "-s"] and calls[-1][4].startswith("@")
+    # Never trusted: nonsense values, or when the Pi has internet time.
+    for bad in ("soon", None, True, 12, 9e9):
+        with pytest.raises(printing.PrintError):
+            system.set_clock(bad)
+    monkeypatch.setattr(system, "clock_synchronized", lambda: True)
+    assert system.set_clock(now + 36000)["adjusted"] is False
+    # Test mode never touches the clock.
+    assert client.post("/api/clock", json={"now": now + 36000}).get_json()["adjusted"] is False
+
+
+def test_clock_fix_corrects_job_times(app, client, monkeypatch):
+    from printserver import system
+    client.post("/api/photos/print", data={"layout": "1", "cell0": (jpeg(), "a.jpg")},
+                content_type="multipart/form-data")
+    before = client.get("/api/queue").get_json()
+    stamped = before["recent"][0]["time"]
+    assert abs(before["now"] - time.time()) < 5
+    app.config["DRY_RUN"] = False
+    monkeypatch.setattr(system, "set_clock", lambda now, dry_run=False: {"adjusted": True, "offset": 3600})
+    monkeypatch.setattr(system, "boot_time", lambda: stamped - 60)
+    assert client.post("/api/clock", json={"now": time.time() + 3600}).get_json()["adjusted"]
+    app.config["DRY_RUN"] = True
+    assert client.get("/api/queue").get_json()["recent"][0]["time"] == pytest.approx(stamped + 3600)

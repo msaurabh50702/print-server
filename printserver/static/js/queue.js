@@ -5,8 +5,13 @@
   const recentList = document.getElementById("recent-list");
   const template = document.getElementById("job-item");
 
-  function ago(seconds) {
-    const s = Math.max(0, Date.now() / 1000 - seconds);
+  // Job times come from the Pi's clock, so compare them with the Pi's "now"
+  // (the two clocks can disagree when the Pi has no internet time).
+  let serverOffset = 0;   // Pi clock minus phone clock, in seconds
+  const serverNow = () => Date.now() / 1000 + serverOffset;
+
+  function ago(seconds, now = serverNow()) {
+    const s = Math.max(0, now - seconds);
     if (s < 60) return "just now";
     if (s < 3600) return `${Math.floor(s / 60)} min ago`;
     if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
@@ -61,9 +66,10 @@
 
   let lastRendered = "";
   function render(data) {
+    if (data.now) serverOffset = data.now - Date.now() / 1000;
     // Skip redrawing when nothing changed (except "x min ago" labels, which
     // are refreshed at least once a minute).
-    const signature = JSON.stringify(data) + Math.floor(Date.now() / 60000);
+    const signature = JSON.stringify({ ...data, now: 0 }) + Math.floor(Date.now() / 60000);
     if (signature === lastRendered) return;
     lastRendered = signature;
     activeList.replaceChildren(...data.active.map((job) =>
@@ -165,7 +171,7 @@
     savedList.replaceChildren(...jobs.map((job) => {
       const el = savedTemplate.content.firstElementChild.cloneNode(true);
       el.querySelector(".job-title").textContent = job.title;
-      el.querySelector(".job-meta").textContent = `${job.printerLabel} · saved ${ago(job.created / 1000)}`;
+      el.querySelector(".job-meta").textContent = `${job.printerLabel} · saved ${ago(job.created / 1000, Date.now() / 1000)}`;
       const [label, cls] = SAVED_STATES[job.status] || SAVED_STATES.waiting;
       const badge = el.querySelector(".badge");
       badge.textContent = label;
@@ -227,6 +233,9 @@
       }
     });
   }
+
+  // After the phone corrected the Pi's clock, show the corrected job times.
+  document.addEventListener("clockfixed", () => { lastRendered = ""; load(); });
 
   renderPrinters(overviewData);
   document.addEventListener("overview", (e) => renderPrinters(e.detail));
