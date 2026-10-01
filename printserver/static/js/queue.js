@@ -78,7 +78,7 @@
     if (loading) return;
     loading = true;
     try {
-      const res = await fetch("/api/queue");
+      const res = await fetch("/api/queue", { cache: "no-store" });
       if (!res.ok) throw new Error();
       render(await res.json());
     } catch (_) {

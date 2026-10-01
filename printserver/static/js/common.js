@@ -196,7 +196,8 @@ function refreshStatus() {
   // shouldn't leave the page waiting forever.
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 8000);
-  refreshing = refreshing || fetch("/api/printers", { signal: abort.signal })
+  // no-store: going back to a page, Chrome would otherwise reuse an old answer.
+  refreshing = refreshing || fetch("/api/printers", { signal: abort.signal, cache: "no-store" })
     .then((res) => {
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       return res.json();
@@ -294,6 +295,11 @@ async function submitPrintJob({ title, url, form, docs, options, button, count =
       job.key = Outbox.newKey();   // no storage (e.g. private mode): send without saving
     }
     ownJobs.add(job.key);
+    if (saved && !serverOnline) {
+      // Known to be offline: just keep it; it's sent when the server is back.
+      result = { retry: true };
+      return finishPrint(job, saved, result, count, label);
+    }
     const sending = saved ? Outbox.flush({ only: job.key }).then((r) => r.result) : Outbox.deliver(job);
     // Don't keep the button spinning on a very slow connection: the job is
     // saved and finishes in the background.
@@ -304,6 +310,10 @@ async function submitPrintJob({ title, url, form, docs, options, button, count =
   } finally {
     setBusy(button, false);
   }
+  return finishPrint(job, saved, result, count, label);
+}
+
+async function finishPrint(job, saved, result, count, label) {
   result = result || { ok: true };
   if (result.deleted) return false;  // deleted from the queue page while sending
   if (result.slow) {
@@ -338,15 +348,22 @@ try {
   if (stored && (stored.generated || 0) > (overviewData.generated || 0)) overviewData = stored;
 } catch (_) { /* private mode */ }
 applyOverview(overviewData);
-if (!overviewData.generated || Date.now() / 1000 - overviewData.generated > 20) refreshStatus();
+// The page may have come from the copy saved on the phone, so check now
+// whether the server can actually be reached (the server caches this, so it's quick).
+refreshStatus();
 if (window.Outbox) countSavedJobs().then(() => waitingJobs && serverOnline && sendSavedJobs());
 window.addEventListener("online", () => refreshStatus());
 // Page scripts load after this file; tell them about the printer once they're listening.
 document.addEventListener("DOMContentLoaded", applyPrinterCaps);
 setInterval(() => document.visibilityState === "visible" && refreshStatus(), 10000);
-document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshStatus());
-// Pages restored from the back/forward cache carry old data.
-window.addEventListener("pageshow", (e) => e.persisted && refreshStatus());
+// Back to this page (another tab or app, or the back button restoring it from
+// memory): saved jobs may have been deleted or sent meanwhile.
+function recheck() {
+  if (window.Outbox) countSavedJobs();
+  refreshStatus();
+}
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && recheck());
+window.addEventListener("pageshow", (e) => e.persisted && recheck());
 
 // Service worker: makes the app installable and keeps it on the phone for
 // offline use (browsers only allow this on HTTPS).

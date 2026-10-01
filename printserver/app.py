@@ -25,6 +25,7 @@ OFFLINE_PAGES = ["/", "/photos", "/free-size", "/passport", "/id-card", "/docume
 for _type, _ext in (("image/heic", ".heic"), ("image/heif", ".heif"), ("image/webp", ".webp")):
     mimetypes.add_type(_type, _ext)
 MAX_BATCH = 20
+RECENT_JOBS = 8   # finished jobs listed on the queue page
 
 
 def create_app(config=None):
@@ -95,7 +96,7 @@ def create_app(config=None):
                 continue
             state = "cancelled" if entry.get("cancelled") else "done"
             recent.append({**entry, "state": state})
-        return {"active": active, "recent": recent[:20]}
+        return {"active": active, "recent": recent[:RECENT_JOBS]}
 
     @app.context_processor
     def inject_boot():
@@ -299,13 +300,19 @@ def create_app(config=None):
         response.cache_control.no_store = True
         return response
 
+    def live(data):
+        """Printer and queue state must never be answered from a browser cache."""
+        response = jsonify(data)
+        response.cache_control.no_store = True
+        return response
+
     @app.get("/api/printers")
     def printers_list():
-        return jsonify(overview())
+        return live(overview())
 
     @app.get("/api/queue")
     def queue_list():
-        return jsonify(queue_data())
+        return live(queue_data())
 
     @app.post("/api/queue/<job_id>/cancel")
     def queue_cancel(job_id):

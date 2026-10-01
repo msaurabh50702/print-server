@@ -1003,3 +1003,19 @@ def test_offline_banner_and_outbox_script_on_pages(client):
     assert 'id="offline-banner"' in html and "js/outbox.js" in html
     assert '"generated"' in html
     assert 'id="saved-section"' in client.get("/queue").get_data(as_text=True)
+
+
+def test_recent_jobs_list_is_short(client):
+    for i in range(12):
+        client.post("/api/photos/print", data={"layout": "1", "cell0": (jpeg(), "a.jpg")},
+                    content_type="multipart/form-data")
+    data = client.get("/api/queue").get_json()
+    assert len(data["recent"]) == 8
+    assert "no-store" in client.get("/api/queue").headers["Cache-Control"]
+
+
+def test_refused_print_is_logged(client, caplog):
+    with caplog.at_level("WARNING"):
+        res = client.post("/api/photos/print", data={"copies": "1"})
+    assert res.get_json()["error"] == "Unknown layout"
+    assert "/api/photos/print refused: Unknown layout" in caplog.text and "['copies']" in caplog.text

@@ -204,21 +204,33 @@
     }
   }
 
-  // Only one sender at a time across tabs and the service worker.
-  function exclusive(task) {
-    if (global.navigator && navigator.locks) return navigator.locks.request("printer-outbox", task);
-    return task();
-  }
+  // While a job is being sent it's marked with a deadline; other tabs and the
+  // service worker leave it alone until then, without waiting for each other
+  // (a frozen tab must never block printing). Should two ever send the same
+  // job, its key makes sure it prints only once.
+  const jobBytes = (job) => (job.kind === "documents"
+    ? job.docs.reduce((sum, doc) => sum + ((doc.file && doc.file.size) || 0), 0)
+    : sizeOf(job.fields || []));
+  const busyElsewhere = (job, now) => job.status === "sending" && (job.sendingUntil || 0) > now;
 
   /**
    * Send saved jobs in order. With `only`, send just that job (and report on it).
    * Stops at the first job the server can't be reached for.
    * Returns { sent: [job], failed: [job], pending: bool, result }.
    */
+  let running = null;   // background flush in this tab / worker
   function flush({ only = null } = {}) {
-    return exclusive(async () => {
+    if (only) return sendJobs(only);
+    running = running || sendJobs(null).finally(() => { running = null; });
+    return running;
+  }
+
+  async function sendJobs(only) {
+    {
       const report = { sent: [], failed: [], pending: false, result: null };
-      const jobs = (await all()).filter((job) => (only ? job.key === only : job.status !== "failed"));
+      const now = Date.now();
+      const jobs = (await all()).filter((job) => (only ? job.key === only
+        : job.status !== "failed" && !busyElsewhere(job, now)));
       if (!jobs.length) {
         if (only) report.result = { deleted: true };
         return report;
@@ -230,6 +242,7 @@
       }
       for (const job of jobs) {
         job.status = "sending";
+        job.sendingUntil = Date.now() + timeoutFor(jobBytes(job)) + 15000;
         if (!(await update(job))) continue;  // deleted meanwhile
         changed();
         const result = await deliver(job);
@@ -250,7 +263,7 @@
       }
       if (!only) report.pending = report.pending || (await all()).some((j) => j.status !== "failed");
       return report;
-    });
+    }
   }
 
   async function add(job) {
