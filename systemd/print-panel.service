@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Print Server status LEDs and buttons
+# Starts early: it shows the network and server coming up.
+After=local-fs.target
+
+[Service]
+Type=simple
+# Root: reads GPIO pins and restarts services / the Pi from the buttons.
+WorkingDirectory=__DIR__
+EnvironmentFile=-/etc/default/print-server
+ExecStart=/usr/bin/python3 __DIR__/printserver/panel.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

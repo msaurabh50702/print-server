@@ -225,6 +225,29 @@ set up before this was added, run `./install.sh` again.
 (GPIO 3 and ground), add `dtoverlay=gpio-shutdown` to `/boot/firmware/config.txt` and reboot. Pressing
 it then shuts the Pi down, and pressing it again while shut down turns it back on.
 
+### Status LEDs and buttons (optional)
+
+Four LEDs and two buttons on the Pi's GPIO header show what's going on and fix common problems
+without a phone or SSH. Wire them, then run `./scripts/setup-panel.sh` (it needs `python3-gpiozero`,
+which it installs if missing: that needs internet once).
+
+| Part | BCM pin | Physical pin | Meaning |
+|---|---|---|---|
+| POWER LED | GPIO 5 | 29 | slow blink: the Pi is running |
+| NETWORK LED | GPIO 6 | 31 | on: has an address · slow blink: Wi-Fi joined, waiting for the router to give an address · off: no Wi-Fi |
+| SERVER LED | GPIO 13 | 33 | on: the app answers · fast blink: starting or not answering |
+| PRINTER LED | GPIO 19 | 35 | on: ready · slow blink: printing · flicker: ink/toner/paper low · fast blink: switched off or error · off: none set up |
+| FIX button | GPIO 26 | 37 | press: restart the printing services (and reconnect Wi-Fi if there's no address) · hold 5 s: restart the Pi |
+| POWER button | GPIO 3 | 5 | hold 3 s: shut down · press while shut down: start the Pi |
+| Ground | | 39 (and 6 for the POWER button) | |
+
+Each LED goes from its pin through a 220–330 Ω resistor (long leg towards the pin) to ground; each
+button goes between its pin and ground. When a button is accepted, all LEDs light up until the action
+is done. Pins can be changed in `/etc/default/print-server` (`PANEL_LED_POWER=…`, `PANEL_BUTTON_FIX=…`),
+then `sudo systemctl restart print-panel`. `./scripts/setup-panel.sh --disable` removes it. If you add a
+DS3231 clock module, it shares GPIO 3 with the POWER button; that works, but you can move the button
+with `PANEL_BUTTON_POWER=21` (it then can't start a shut-down Pi).
+
 ## Configuration
 
 Edit `/etc/default/print-server`, then run `sudo systemctl restart print-server`.
