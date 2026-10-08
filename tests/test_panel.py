@@ -111,6 +111,12 @@ def test_restart_reconnects_wifi_without_address(monkeypatch):
     commands = []
     run = lambda args, **kw: commands.append(args) or type("R", (), {"returncode": 0})()
     monkeypatch.setattr(panel, "network_state", lambda: (False, True))
+    monkeypatch.setattr(panel, "_link_up", lambda device: False)
     panel.restart_services(run)
     assert commands[0] == ["nmcli", "device", "disconnect", "wlan0"]
+    # With the cable plugged in, the cable is reconnected instead.
+    commands.clear()
+    monkeypatch.setattr(panel, "_link_up", lambda device: device == "eth0")
+    panel.restart_services(run)
+    assert commands[0] == ["nmcli", "device", "disconnect", "eth0"]
     assert ["systemctl", "restart", "cups"] in commands

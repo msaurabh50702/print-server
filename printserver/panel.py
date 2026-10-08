@@ -6,8 +6,8 @@ stop printing.
 
 LEDs (each through a 220-330 ohm resistor to ground):
   POWER    slow blink: the Pi is running (heartbeat)
-  NETWORK  on: has an address | slow blink: Wi-Fi joined, waiting for an
-           address from the router | off: no Wi-Fi
+  NETWORK  on: has an address | slow blink: cable plugged in or Wi-Fi joined,
+           waiting for an address from the router | off: no cable, no Wi-Fi
   SERVER   on: the app answers | fast blink: not answering / starting
   PRINTER  on: all ready | slow blink: printing | flicker: ink, toner or paper
            low | fast blink: switched off or an error | off: none set up, or
@@ -92,16 +92,20 @@ def _run(args, timeout=10):
         return None
 
 
+def _link_up(device):
+    """True if the network cable is plugged in (eth0) or the Wi-Fi is joined (wlan0)."""
+    try:
+        with open(f"/sys/class/net/{device}/operstate") as f:
+            return f.read().strip() == "up"
+    except OSError:
+        return False
+
+
 def network_state():
-    """(has an IPv4 address, Wi-Fi joined) for the Pi's network interfaces."""
+    """(has an IPv4 address, linked: cable plugged in or Wi-Fi joined)."""
     result = _run(["ip", "-4", "-o", "addr", "show", "scope", "global"])
     has_address = bool(result and result.stdout.strip())
-    try:
-        with open("/sys/class/net/wlan0/operstate") as f:
-            wifi_joined = f.read().strip() == "up"
-    except OSError:
-        wifi_joined = False
-    return has_address, wifi_joined
+    return has_address, _link_up("eth0") or _link_up("wlan0")
 
 
 def app_url(path):
@@ -134,9 +138,11 @@ def restart_services(run=_run):
     """The fix-it button: reconnect Wi-Fi if needed, then restart the printing services."""
     has_address, _ = network_state()
     if not has_address:
-        log.info("no network address: reconnecting Wi-Fi")
-        run(["nmcli", "device", "disconnect", "wlan0"], timeout=20)
-        run(["nmcli", "device", "connect", "wlan0"], timeout=60)
+        # Reconnect whichever is in use: the cable if it's plugged in, else Wi-Fi.
+        device = "eth0" if _link_up("eth0") else "wlan0"
+        log.info("no network address: reconnecting %s", device)
+        run(["nmcli", "device", "disconnect", device], timeout=20)
+        run(["nmcli", "device", "connect", device], timeout=60)
     for service in SERVICES:
         check = run(["systemctl", "cat", service])
         if check and check.returncode == 0:   # skip services that aren't installed

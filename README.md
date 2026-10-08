@@ -234,10 +234,10 @@ which it installs if missing: that needs internet once).
 | Part | BCM pin | Physical pin | Meaning |
 |---|---|---|---|
 | POWER LED | GPIO 5 | 29 | slow blink: the Pi is running |
-| NETWORK LED | GPIO 6 | 31 | on: has an address · slow blink: Wi-Fi joined, waiting for the router to give an address · off: no Wi-Fi |
+| NETWORK LED | GPIO 6 | 31 | on: has an address · slow blink: cable plugged in or Wi-Fi joined, waiting for the router to give an address · off: no cable and no Wi-Fi |
 | SERVER LED | GPIO 13 | 33 | on: the app answers · fast blink: starting or not answering |
 | PRINTER LED | GPIO 19 | 35 | on: ready · slow blink: printing · flicker: ink/toner/paper low · fast blink: switched off or error · off: none set up |
-| FIX button | GPIO 26 | 37 | press: restart the printing services (and reconnect Wi-Fi if there's no address) · hold 5 s: restart the Pi |
+| FIX button | GPIO 26 | 37 | press: restart the printing services (and reconnect the network if there's no address) · hold 5 s: restart the Pi |
 | POWER button | GPIO 3 | 5 | hold 3 s: shut down · press while shut down: start the Pi |
 | Ground | | 39 (and 6 for the POWER button) | |
 
